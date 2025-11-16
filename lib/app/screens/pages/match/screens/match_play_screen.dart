@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/match/match_controller.dart';
 import 'package:afn_test/app/screens/pages/match/widgets/match_question_widget.dart';
 import 'package:afn_test/app/screens/pages/match/widgets/match_timer_widget.dart';
@@ -367,7 +368,7 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
           final match = controller.currentMatch.value;
           if (match == null || match.questions.isEmpty) {
             return Center(
-              child: CircularProgressIndicator(
+              child: SpinkitLoader(
                 color: AppColors.primaryTeal,
               ),
             );

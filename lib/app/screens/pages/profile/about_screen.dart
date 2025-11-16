@@ -12,6 +12,21 @@ class AboutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
+         appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Iconsax.arrow_left, color: AppColors.primaryTeal),
+          onPressed: () => Get.back(),
+        ),
+        title: Text(
+          'About',
+          style: AppTextStyles.bodyLarge.copyWith(
+            color: AppColors.primaryTeal,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.all(13.w),
@@ -19,23 +34,7 @@ class AboutScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header
-              Row(
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.arrow_back, color: AppColors.primaryTeal),
-                    onPressed: () => Get.back(),
-                  ),
-                  SizedBox(width: 8.w),
-                  Text(
-                    'About',
-                    style: AppTextStyles.headlineSmall.copyWith(
-                      color: AppColors.primaryTeal,
-                      fontSize: 19.sp,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
+              
 
               SizedBox(height: 24.h),
 

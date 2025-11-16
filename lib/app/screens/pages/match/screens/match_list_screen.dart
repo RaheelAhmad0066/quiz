@@ -87,7 +87,7 @@ class MatchListScreen extends StatelessWidget {
       body: Obx(() {
         if (controller.isLoading.value) {
           return Center(
-            child: CircularProgressIndicator(
+            child: SpinkitLoader(
               color: AppColors.primaryTeal,
             ),
           );

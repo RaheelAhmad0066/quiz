@@ -1,5 +1,6 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/match/match_controller.dart';
 import 'package:afn_test/app/models/match/match_model.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
@@ -169,7 +170,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(
+                  SpinkitLoader(
                     color: AppColors.primaryTeal,
                   ),
                   SizedBox(height: 16.h),
@@ -201,7 +202,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(
+                  SpinkitLoader(
                     color: AppColors.primaryTeal,
                   ),
                   SizedBox(height: 16.h),
@@ -225,7 +226,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(
+                  SpinkitLoader(
                     color: AppColors.primaryTeal,
                   ),
                   SizedBox(height: 16.h),

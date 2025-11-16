@@ -1,6 +1,8 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_sized_box.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/app_icons.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/leaderboard_controller.dart';
 import 'package:afn_test/app/models/leaderboard_model.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +10,23 @@ import 'package:get/get.dart';
 
 class LeaderboardScreen extends StatelessWidget {
   const LeaderboardScreen({Key? key}) : super(key: key);
+
+  /// Get asset image path based on name
+  String _getProfileAssetImage(String name) {
+    final lowerName = name.toLowerCase();
+    if (lowerName.contains('bryan') || lowerName.contains('alex') || lowerName.contains('ricardo') || 
+        lowerName.contains('gary') || lowerName.contains('turner') || lowerName.contains('wolf') ||
+        lowerName.contains('veum') || lowerName.contains('sanford')) {
+      return AppIcons.man;
+    } else if (lowerName.contains('meghan') || lowerName.contains('marsha') || lowerName.contains('juanita') ||
+               lowerName.contains('tamara') || lowerName.contains('becky') || lowerName.contains('fisher') ||
+               lowerName.contains('cormier') || lowerName.contains('schmidt') || lowerName.contains('bartell') ||
+               lowerName.contains('jessica') || lowerName.contains('jes')) {
+      return AppIcons.girl;
+    } else {
+      return AppIcons.businessman; // default
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +38,7 @@ class LeaderboardScreen extends StatelessWidget {
       body: Obx(() {
         if (controller.isLoading.value) {
           return const Center(
-            child: CircularProgressIndicator(),
+            child: SpinkitLoader(),
           );
         }
 
@@ -133,22 +152,14 @@ class LeaderboardScreen extends StatelessWidget {
         ? AppColors.primaryTeal
         : AppColors.primaryTeal.withOpacity(0.2);
     
-    // Get emoji based on name (same logic as before - no URL images)
-    final name = player.userName.toLowerCase();
-    String emoji = '👤'; // default
-    if (name.contains('bryan') || name.contains('alex') || name.contains('ricardo') || 
-        name.contains('gary') || name.contains('turner') || name.contains('wolf')) {
-      emoji = '👨';
-    } else if (name.contains('meghan') || name.contains('marsha') || name.contains('juanita') ||
-               name.contains('tamara') || name.contains('becky') || name.contains('fisher') ||
-               name.contains('cormier') || name.contains('schmidt') || name.contains('bartell')) {
-      emoji = '👩';
-    }
+    // Get asset image based on name
+    final profileImage = _getProfileAssetImage(player.userName);
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Stack(
+          clipBehavior: Clip.none,
           alignment: Alignment.topCenter,
           children: [
             Container(
@@ -164,43 +175,67 @@ class LeaderboardScreen extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Text(
-                    emoji,
-                    style: const TextStyle(fontSize: 40),
+                  child: Image.asset(
+                    profileImage,
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),
             ),
             if (isFirst)
-              Container(
-                width: 32,
-                height: 32,
-                decoration: const BoxDecoration(
-                  color: AppColors.accentYellowGreen,
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Text(
-                    '👑',
-                    style: TextStyle(fontSize: 18),
+              Positioned(
+                top: -8,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    color: AppColors.accentYellowGreen,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Text(
+                      '👑',
+                      style: TextStyle(fontSize: 18),
+                    ),
                   ),
                 ),
               ),
-            if (isSecond || isThird)
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: badgeColor,
-                  shape: BoxShape.circle,
+            if (isSecond)
+              Positioned(
+                top: -8,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Image.asset(
+                      AppIcons.medal2,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
                 ),
-                child: Center(
-                  child: Text(
-                    '$rank',
-                    style: AppTextStyles.label14.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: Colors.black,
+              ),
+            if (isThird)
+              Positioned(
+                top: -8,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Image.asset(
+                      AppIcons.medal3,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.contain,
                     ),
                   ),
                 ),
@@ -229,19 +264,8 @@ class LeaderboardScreen extends StatelessWidget {
   Widget _buildLeaderboardItem(LeaderboardModel player, int rank) {
     bool isUser = player.isCurrentUser;
     
-    // Get emoji based on name (same logic as before - no URL images)
-    final name = player.userName.toLowerCase();
-    String emoji = '👤'; // default
-    if (name.contains('bryan') || name.contains('alex') || name.contains('ricardo') || 
-        name.contains('gary') || name.contains('turner') || name.contains('wolf') ||
-        name.contains('veum') || name.contains('sanford')) {
-      emoji = '👨';
-    } else if (name.contains('meghan') || name.contains('marsha') || name.contains('juanita') ||
-               name.contains('tamara') || name.contains('becky') || name.contains('fisher') ||
-               name.contains('cormier') || name.contains('schmidt') || name.contains('bartell') ||
-               name.contains('jessica') || name.contains('jes')) {
-      emoji = '👩';
-    }
+    // Get asset image based on name
+    final profileImage = _getProfileAssetImage(player.userName);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -264,9 +288,11 @@ class LeaderboardScreen extends StatelessWidget {
           CircleAvatar(
             radius: 18,
             backgroundColor: Colors.grey[300],
-            child: Text(
-              emoji,
-              style: const TextStyle(fontSize: 18),
+            child: Image.asset(
+              profileImage,
+              width: 32,
+              height: 32,
+              fit: BoxFit.contain,
             ),
           ),
           const SizedBox(width: 12),

@@ -1,6 +1,7 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
 import 'package:afn_test/app/app_widgets/app_toast.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/quiz_controller.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
 import 'package:flutter/material.dart';
@@ -37,7 +38,7 @@ class QuizProgressScreen extends StatelessWidget {
       body: Obx(() {
         if (controller.isLoadingTests.value) {
           return Center(
-            child: CircularProgressIndicator(
+            child: SpinkitLoader(
               color: AppColors.primaryTeal,
             ),
           );

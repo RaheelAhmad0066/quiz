@@ -1,5 +1,6 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -69,7 +70,7 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
       body: Obx(() {
         if (isLoadingHistory.value) {
           return Center(
-            child: CircularProgressIndicator(
+            child: SpinkitLoader(
               color: AppColors.primaryTeal,
             ),
           );

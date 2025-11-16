@@ -13,4 +13,14 @@ class AppIcons {
   static const String english = 'assets/icons/eng.png';
   static const String google = 'assets/icons/google.png';
   static const String apple = 'assets/icons/apple.png';
+  static const String check = 'assets/icons/check.png';
+  static const String medal = 'assets/icons/medal.png';
+  static const String medal2 = 'assets/icons/medal2.png';
+  static const String medal3 = 'assets/icons/medal3.png';
+  static const String star = 'assets/icons/star.png';
+  static const String trophy = 'assets/icons/trophy.png';
+  static const String businessman = 'assets/icons/businessman.png';
+  static const String man = 'assets/icons/man.png';
+  static const String girl = 'assets/icons/girl.png';
+
 }

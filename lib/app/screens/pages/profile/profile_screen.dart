@@ -1,5 +1,6 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/app_icons.dart';
 import 'package:afn_test/app/app_widgets/auth_required_dialog.dart';
 import 'package:afn_test/app/app_widgets/contact_support_dialog.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
@@ -152,7 +153,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 return Container(
                   padding: EdgeInsets.all(20.w),
                   decoration: BoxDecoration(
-                    color: AppColors.accentYellowGreenLight,
+                    color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(20.r),
                     boxShadow: [
                       BoxShadow(
@@ -177,14 +178,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Expanded(
                             child: _buildStatItem(
-                              icon: Iconsax.star,
+                              imageAsset: AppIcons.star,
                               label: 'Total Points',
                               value: '${userStats?.totalPoints ?? 0}',
                             ),
                           ),
                           Expanded(
                             child: _buildStatItem(
-                              icon: Iconsax.medal,
+                              imageAsset: AppIcons.trophy,
                               label: 'Matches Won',
                               value: '${userStats?.matchesWon ?? 0}',
                             ),
@@ -196,14 +197,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Expanded(
                             child: _buildStatItem(
-                              icon: Iconsax.book,
+                              imageAsset: AppIcons.star,
                               label: 'Tests Completed',
                               value: '${userStats?.testsCompleted ?? 0}',
                             ),
                           ),
                           Expanded(
                             child: _buildStatItem(
-                              icon: Iconsax.ranking,
+                              imageAsset: AppIcons.medal,
                               label: 'Rank',
                               value: userStats != null 
                                   ? '#${leaderboardController.currentLeaderboard.indexWhere((e) => e.userId == userStats.userId) + 1}'
@@ -222,23 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Match History Section - Navigate to full screen
               _buildMatchHistoryTile(),
 
-              SizedBox(height: 12.h),
-
-              _buildMenuTile(
-                icon: Iconsax.user,
-                title: 'Edit Profile',
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  // TODO: Implement edit profile
-                  Get.snackbar(
-                    'Coming Soon',
-                    'Edit profile feature coming soon',
-                    snackPosition: SnackPosition.TOP,
-                    backgroundColor: AppColors.info,
-                    colorText: Colors.white,
-                  );
-                },
-              ),
+            
 
               SizedBox(height: 12.h),
 
@@ -372,13 +357,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildStatItem({
-    required IconData icon,
+    required String imageAsset,
     required String label,
     required String value,
   }) {
     return Column(
       children: [
-        Icon(icon, color: AppColors.primaryTeal, size: 32.sp),
+        Image.asset(
+          imageAsset,
+          width: 32.sp,
+          height: 32.sp,
+          fit: BoxFit.contain,
+        ),
         SizedBox(height: 8.h),
         Text(
           value,

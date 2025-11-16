@@ -1,5 +1,6 @@
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
+import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/quiz_controller.dart';
 import 'package:afn_test/app/models/topic_model.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
@@ -40,7 +41,7 @@ class TopicsListScreen extends StatelessWidget {
       body: Obx(() {
         if (controller.isLoadingTopics.value) {
           return Center(
-            child: CircularProgressIndicator(
+            child: SpinkitLoader(
               color: AppColors.primaryTeal,
             ),
           );
@@ -82,7 +83,7 @@ class TopicsListScreen extends StatelessWidget {
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
               return Center(
-                child: CircularProgressIndicator(
+                child: SpinkitLoader(
                   color: AppColors.primaryTeal,
                 ),
               );

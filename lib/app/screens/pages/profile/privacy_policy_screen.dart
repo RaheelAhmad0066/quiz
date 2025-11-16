@@ -3,6 +3,7 @@ import 'package:afn_test/app/app_widgets/app_text_styles.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:iconsax/iconsax.dart';
 
 /// Privacy Policy Screen
 class PrivacyPolicyScreen extends StatelessWidget {
@@ -12,22 +13,19 @@ class PrivacyPolicyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
-      appBar: AppBar(
+         appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Iconsax.arrow_left, color: AppColors.primaryTeal),
+          onPressed: () => Get.back(),
+        ),
         title: Text(
           'Privacy Policy',
-          style: AppTextStyles.headlineMedium.copyWith(
-            color: AppColors.textWhite,
-            fontWeight: FontWeight.bold,
+          style: AppTextStyles.bodyLarge.copyWith(
+            color: AppColors.primaryTeal,
+            fontWeight: FontWeight.w800,
           ),
-        ),
-        backgroundColor: AppColors.primaryTeal,
-        leading: IconButton(
-          icon: Icon(
-            Icons.arrow_back,
-            color: AppColors.textWhite,
-            size: 24.sp,
-          ),
-          onPressed: () => Get.back(),
         ),
       ),
       body: SingleChildScrollView(
