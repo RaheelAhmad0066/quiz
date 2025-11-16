@@ -26,8 +26,9 @@ class MatchPlayScreen extends StatefulWidget {
 class _MatchPlayScreenState extends State<MatchPlayScreen> {
   Timer? _timer;
   Timer? _allPlayersAnsweredTimer;
-  StreamSubscription? _timerSubscription;
-  int _currentSeconds = 30; // Changed to 30 seconds
+  static const int QUESTION_DURATION_SECONDS = 10; // 10 seconds per question
+  int _currentSeconds = QUESTION_DURATION_SECONDS;
+  int _lastQuestionIndex = -1; // Track last question index
   bool _answerSubmitted = false;
   bool _isMovingToNext = false;
 
@@ -37,100 +38,139 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
     final controller = Get.find<MatchController>();
     // Ensure match listener is active
     controller.listenToMatch(widget.matchId);
-    _startTimer();
-    _checkAllPlayersAnswered();
+    
+    // Listen to match changes to detect question index changes
+    ever(controller.currentMatch, (match) {
+      if (match != null && mounted) {
+        final currentIndex = match.currentQuestionIndex;
+        if (currentIndex != _lastQuestionIndex && _lastQuestionIndex != -1) {
+          // Question changed, restart timer
+          _lastQuestionIndex = currentIndex;
+          _initializeTimer();
+          _checkAllPlayersAnswered();
+        }
+      }
+    });
+    
+    _initializeTimer();
+    _checkAllPlayersAnswered(); // Check if all players answered to move immediately
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     _allPlayersAnsweredTimer?.cancel();
-    _timerSubscription?.cancel();
     super.dispose();
   }
 
-  void _startTimer() {
+  /// Initialize static countdown timer (no Firebase sync)
+  void _initializeTimer() {
+    // Cancel all existing timers
+    _timer?.cancel();
+    _allPlayersAnsweredTimer?.cancel();
+    
+    // Reset flags for new question
     _answerSubmitted = false;
     _isMovingToNext = false;
-
-    _timer?.cancel();
-    _timerSubscription?.cancel();
     
     final controller = Get.find<MatchController>();
+    final match = controller.currentMatch.value;
     
-    // Use periodic timer to update UI every second based on Firebase timestamp
+    if (match == null) {
+      print('⚠️ Match is null, cannot initialize timer');
+      return;
+    }
+    
+    // Update last question index
+    final currentQuestionIndex = match.currentQuestionIndex;
+    _lastQuestionIndex = currentQuestionIndex;
+    
+    print('🔄 Initializing static timer for question ${currentQuestionIndex + 1}...');
+    
+    // Reset timer to full duration
+    if (mounted) {
+      setState(() {
+        _currentSeconds = QUESTION_DURATION_SECONDS;
+      });
+    }
+    
+    // Start static countdown timer
+    _startLocalTimer();
+  }
+  
+  /// Start static countdown timer (updates UI every second)
+  void _startLocalTimer() {
+    _timer?.cancel();
+    
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
-      if (!mounted) {
+      if (!mounted || _isMovingToNext) {
         timer.cancel();
         return;
       }
       
+      final controller = Get.find<MatchController>();
       final match = controller.currentMatch.value;
-      
       if (match == null) {
         timer.cancel();
         return;
       }
       
-      // Get question start time from Firebase (synchronized across all players)
-      final matchRef = controller.databaseRef?.child('matches').child(widget.matchId);
-      if (matchRef != null) {
-        matchRef.child('currentQuestionStartTime').get().then((snapshot) {
-          if (snapshot.exists && mounted) {
-            final questionStartTime = snapshot.value as int?;
-            if (questionStartTime != null) {
-              // Calculate remaining time based on server timestamp (synchronized)
-              final now = DateTime.now().millisecondsSinceEpoch;
-              final elapsed = (now - questionStartTime) ~/ 1000; // seconds
-              final remaining = 30 - elapsed;
+      // Check if question changed
+      if (match.currentQuestionIndex != _lastQuestionIndex) {
+        timer.cancel();
+        _initializeTimer();
+        _checkAllPlayersAnswered();
+        return;
+      }
+      
+      // Simple countdown
+      if (mounted) {
+        setState(() {
+          if (_currentSeconds > 0) {
+            _currentSeconds--;
+          } else {
+            // Timer reached 0 - immediately move to next question
+            if (!_isMovingToNext) {
+              _isMovingToNext = true;
+              timer.cancel();
+              _allPlayersAnsweredTimer?.cancel();
               
-              if (mounted) {
-                setState(() {
-                  _currentSeconds = remaining > 0 ? remaining : 0;
-                });
-                
-                if (remaining <= 0) {
-                  _timer?.cancel();
-                  _handleTimeout();
+              print('⏰ Timer reached 0. Moving to next question...');
+              
+              // Submit answer if not submitted
+              if (!_answerSubmitted) {
+                final currentIndex = match.currentQuestionIndex;
+                if (currentIndex >= 0 && currentIndex < match.questions.length) {
+                  controller.submitAnswer(widget.matchId, currentIndex, -1).then((_) {
+                    print('✅ Submitted empty answer (-1) for question ${currentIndex + 1}');
+                  }).catchError((e) {
+                    print('❌ Error submitting answer: $e');
+                  });
+                  _answerSubmitted = true;
                 }
               }
+              
+              // Move to next question immediately
+              Future.delayed(Duration(milliseconds: 200), () {
+                if (mounted && _isMovingToNext) {
+                  _moveToNextQuestion();
+                }
+              });
             }
-          }
-        }).catchError((e) {
-          // Fallback: use local countdown if server time not available
-          if (mounted) {
-            setState(() {
-              if (_currentSeconds > 0) {
-                _currentSeconds--;
-              } else {
-                timer.cancel();
-                _handleTimeout();
-              }
-            });
           }
         });
-      } else {
-        // Fallback: use local countdown if Firebase not available
-        if (mounted) {
-          setState(() {
-            if (_currentSeconds > 0) {
-              _currentSeconds--;
-            } else {
-              timer.cancel();
-              _handleTimeout();
-            }
-          });
-        }
       }
     });
   }
   
   /// Check if all players have answered
   void _checkAllPlayersAnswered() {
+    _allPlayersAnsweredTimer?.cancel();
+    
     final controller = Get.find<MatchController>();
     
-    // Use a periodic check instead of ever to avoid multiple listeners
-    Timer.periodic(Duration(milliseconds: 500), (checkTimer) {
+    // Use a periodic check (every 1 second to avoid too frequent checks)
+    _allPlayersAnsweredTimer = Timer.periodic(Duration(seconds: 1), (checkTimer) {
       if (_isMovingToNext || !mounted) {
         checkTimer.cancel();
         return;
@@ -142,9 +182,27 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
         return;
       }
       
-      final currentQuestion = match.questions[match.currentQuestionIndex];
+      // Check if question index changed (someone moved to next question)
+      final currentQuestionIndex = match.currentQuestionIndex;
+      if (currentQuestionIndex != _lastQuestionIndex) {
+        // Question changed, restart timer for new question
+        _lastQuestionIndex = currentQuestionIndex;
+        checkTimer.cancel();
+        _initializeTimer();
+        _checkAllPlayersAnswered();
+        return;
+      }
+      
+      // Validate question index before accessing
+      if (currentQuestionIndex < 0 || currentQuestionIndex >= match.questions.length) {
+        print('⚠️ Invalid question index: $currentQuestionIndex (total: ${match.questions.length})');
+        checkTimer.cancel();
+        return;
+      }
+      
+      final currentQuestion = match.questions[currentQuestionIndex];
       final questionId = currentQuestion.questionId;
-      final totalPlayers = match.players.length;
+      final maxPlayers = match.maxPlayers; // 2 or 4 players
       final answers = controller.allPlayersAnswers;
       
       // Count how many players have answered this question
@@ -156,64 +214,122 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
         }
       }
       
-      // If all players answered, wait 3 seconds then move to next
-      if (answeredCount >= totalPlayers && !_isMovingToNext) {
+      // If all players answered (based on maxPlayers), move immediately to next question
+      if (answeredCount >= maxPlayers && !_isMovingToNext) {
         checkTimer.cancel();
-        _allPlayersAnsweredTimer?.cancel();
         _isMovingToNext = true;
+        _timer?.cancel(); // Stop timer since all answered
+        _allPlayersAnsweredTimer?.cancel(); // Stop this check timer
         
-        print('✅ All $totalPlayers players answered question ${match.currentQuestionIndex + 1}. Waiting 3 seconds...');
+        print('✅ All $maxPlayers players answered question ${currentQuestionIndex + 1}. Moving to next immediately...');
         
-        // Wait 3 seconds for any late answers
-        _allPlayersAnsweredTimer = Timer(Duration(seconds: 3), () {
-          if (mounted) {
-            _moveToNextQuestion();
-          }
-        });
+        // Move immediately (no wait needed since all answered)
+        if (mounted) {
+          _moveToNextQuestion();
+        }
       }
     });
   }
 
-  void _handleTimeout() {
-    if (!_answerSubmitted) {
-      final controller = Get.find<MatchController>();
-      final match = controller.currentMatch.value;
-      if (match != null) {
-        final currentIndex = match.currentQuestionIndex;
-        // Submit no answer (or default)
-        controller.submitAnswer(widget.matchId, currentIndex, -1);
-      }
+  Future<void> _moveToNextQuestion() async {
+    // Prevent multiple simultaneous calls
+    if (!mounted) {
+      print('⚠️ Widget disposed, cannot move to next question');
+      _isMovingToNext = false;
+      return;
     }
     
-    // After timeout, wait 3 seconds for other players, then move to next
+    // Double check to prevent duplicate calls (flag should already be set by caller)
     if (!_isMovingToNext) {
       _isMovingToNext = true;
-      _allPlayersAnsweredTimer?.cancel();
-      _allPlayersAnsweredTimer = Timer(Duration(seconds: 3), () {
-        if (mounted) {
-          _moveToNextQuestion();
-        }
-      });
     }
-  }
-
-  void _moveToNextQuestion() {
-    if (_isMovingToNext && mounted) {
+    
+    // Cancel all timers immediately
+    _timer?.cancel();
+    _allPlayersAnsweredTimer?.cancel();
+    
+    final controller = Get.find<MatchController>();
+    final match = controller.currentMatch.value;
+    
+    if (match == null) {
+      print('⚠️ Match is null, cannot move to next question');
       _isMovingToNext = false;
-      _allPlayersAnsweredTimer?.cancel();
+      return;
+    }
+    
+    // Validate match has questions
+    if (match.questions.isEmpty) {
+      print('⚠️ Match has no questions');
+      _isMovingToNext = false;
+      return;
+    }
+    
+    // Validate current question index
+    final currentIndex = match.currentQuestionIndex;
+    final totalQuestions = match.questions.length;
+    
+    if (currentIndex < 0 || currentIndex >= totalQuestions) {
+      print('⚠️ Invalid question index: $currentIndex (total questions: $totalQuestions)');
+      _isMovingToNext = false;
+      return;
+    }
+    
+    if (currentIndex < totalQuestions - 1) {
+      // Move to next question
+      print('➡️ Moving from question ${currentIndex + 1} to ${currentIndex + 2} (total: $totalQuestions)...');
+      controller.nextQuestion(widget.matchId).then((_) {
+        print('✅ Successfully moved to next question in Firebase');
+        // Wait a bit for Firebase to update, then reinitialize
+        Future.delayed(Duration(milliseconds: 1000), () {
+          if (mounted) {
+            // Reset all flags for new question
+            _isMovingToNext = false;
+            _answerSubmitted = false;
+            
+            // Force UI update by getting fresh match data
+            final match = controller.currentMatch.value;
+            if (match != null) {
+              setState(() {
+                // Force rebuild
+              });
+            }
+            
+            // Reinitialize timer for new question
+            _initializeTimer();
+            _checkAllPlayersAnswered(); // Re-enable check for new question
+          }
+        });
+      }).catchError((e) {
+        print('❌ Error moving to next question: $e');
+        _isMovingToNext = false;
+      });
+    } else {
+      // Match completed - navigate to results
+      print('🏁 Match completed! All ${totalQuestions} questions answered. Navigating to results...');
+      _isMovingToNext = false;
       
-      final controller = Get.find<MatchController>();
-      final match = controller.currentMatch.value;
-      if (match != null) {
-        if (match.currentQuestionIndex < match.questions.length - 1) {
-          controller.nextQuestion(widget.matchId);
-          _startTimer();
-          _checkAllPlayersAnswered(); // Re-check for next question
-        } else {
-          // Match completed
-          Get.off(() => MatchResultScreen(matchId: widget.matchId));
-        }
-      }
+      // End match and calculate scores before navigating
+      // Wait for scores to be calculated and saved
+      await controller.endMatch(widget.matchId).then((_) {
+        print('✅ Match ended, scores calculated. Navigating to results...');
+        // Wait longer to ensure Firebase has updated and match data is refreshed
+        Future.delayed(Duration(milliseconds: 1500), () {
+          if (mounted) {
+            // Ensure match data is refreshed before navigating
+            controller.listenToMatch(widget.matchId);
+            Get.off(() => MatchResultScreen(matchId: widget.matchId));
+          }
+        });
+      }).catchError((e) {
+        print('❌ Error ending match: $e');
+        // Navigate anyway after a delay
+        Future.delayed(Duration(milliseconds: 1500), () {
+          if (mounted) {
+            controller.listenToMatch(widget.matchId);
+            Get.off(() => MatchResultScreen(matchId: widget.matchId));
+          }
+        });
+      });
     }
   }
 

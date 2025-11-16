@@ -14,8 +14,9 @@ class MatchModel {
   final Map<String, int> scores; // userId -> score
   final String? categoryId;
   final String? topicId;
-  final bool isLocked; // Locked when 4 players join
+  final bool isLocked; // Locked when max players join
   final bool isClosed; // Closed by creator
+  final int maxPlayers; // Maximum players (2 or 4)
 
   MatchModel({
     required this.matchId,
@@ -32,6 +33,7 @@ class MatchModel {
     this.topicId,
     this.isLocked = false,
     this.isClosed = false,
+    this.maxPlayers = 4, // Default to 4 players
   }) : scores = scores ?? {};
 
   factory MatchModel.fromJson(Map<dynamic, dynamic> json, String id) {
@@ -64,6 +66,7 @@ class MatchModel {
       topicId: json['topicId']?.toString(),
       isLocked: json['isLocked'] ?? false,
       isClosed: json['isClosed'] ?? false,
+      maxPlayers: json['maxPlayers'] ?? 4, // Default to 4 for backward compatibility
     );
   }
 
@@ -82,11 +85,12 @@ class MatchModel {
       'topicId': topicId,
       'isLocked': isLocked,
       'isClosed': isClosed,
+      'maxPlayers': maxPlayers,
     };
   }
 
-  bool get isFull => players.length >= 4;
-  bool get canStart => players.length == 4 && status == MatchStatus.waiting;
+  bool get isFull => players.length >= maxPlayers;
+  bool get canStart => players.length >= 2 && players.length == maxPlayers && status == MatchStatus.waiting;
   
   // Get winner from scores
   String? get winnerId {

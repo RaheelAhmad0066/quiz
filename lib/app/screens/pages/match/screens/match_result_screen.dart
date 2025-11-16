@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:afn_test/app/app_widgets/app_colors.dart';
 import 'package:afn_test/app/app_widgets/app_text_styles.dart';
 import 'package:afn_test/app/controllers/match/match_controller.dart';
+import 'package:afn_test/app/models/match/match_model.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
 import 'package:afn_test/app/screens/dashbord/dashboard_controller.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -32,6 +32,11 @@ class _MatchResultScreenState extends State<MatchResultScreen>
   @override
   void initState() {
     super.initState();
+    final controller = Get.find<MatchController>();
+    
+    // Ensure match listener is active to get latest data with scores
+    controller.listenToMatch(widget.matchId);
+    
     _animationController = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: 1500),
@@ -53,11 +58,6 @@ class _MatchResultScreenState extends State<MatchResultScreen>
 
     // Start animation
     _animationController.forward();
-    
-    // Auto-navigate to leaderboard after 5 seconds
-    Timer(Duration(seconds: 5), () {
-      _navigateToLeaderboard();
-    });
   }
 
   @override
@@ -87,21 +87,114 @@ class _MatchResultScreenState extends State<MatchResultScreen>
       body: SafeArea(
         child: Obx(() {
           final match = controller.currentMatch.value;
+          
+          // Wait for match data to load
           if (match == null) {
             return Center(
-              child: CircularProgressIndicator(
-                color: AppColors.primaryTeal,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    color: AppColors.primaryTeal,
+                  ),
+                  SizedBox(height: 16.h),
+                  Text(
+                    'Loading results...',
+                    style: AppTextStyles.titleMedium.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
               ),
             );
           }
 
+          // Get all players with scores
+          final allPlayersWithScores = <MatchPlayer>[];
+          
+          // First, add all players from match.players
+          if (match.players.isNotEmpty) {
+            for (var player in match.players) {
+              allPlayersWithScores.add(player);
+            }
+          }
+          
+          // Also check scores map for any players not in match.players (fallback)
+          // This ensures we show players even if match.players is empty
+          if (match.scores.isNotEmpty) {
+            for (var scoreEntry in match.scores.entries) {
+              final playerId = scoreEntry.key;
+              // Only add if not already in list
+              if (!allPlayersWithScores.any((p) => p.userId == playerId)) {
+                // Try to get player name from Firebase or use fallback
+                String playerName = 'Player ${playerId.substring(0, playerId.length > 8 ? 8 : playerId.length)}';
+                
+                // Create a temporary player entry for display
+                allPlayersWithScores.add(MatchPlayer(
+                  userId: playerId,
+                  userName: playerName,
+                  userEmail: '$playerId@temp.com',
+                  userAvatar: null,
+                  joinedAt: DateTime.now(),
+                ));
+              }
+            }
+          }
+          
+          // If still no players, show loading (match data might still be updating)
+          if (allPlayersWithScores.isEmpty && match.scores.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    color: AppColors.primaryTeal,
+                  ),
+                  SizedBox(height: 16.h),
+                  Text(
+                    'Loading match results...',
+                    style: AppTextStyles.titleMedium.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
           // Sort players by score
-          final sortedPlayers = match.players.toList()
+          final sortedPlayers = allPlayersWithScores.toList()
             ..sort((a, b) {
               final scoreA = match.scores[a.userId] ?? 0;
               final scoreB = match.scores[b.userId] ?? 0;
               return scoreB.compareTo(scoreA);
             });
+
+          // Final check - if still empty, show error
+          if (sortedPlayers.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 64.sp, color: AppColors.primaryTeal),
+                  SizedBox(height: 16.h),
+                  Text(
+                    'No players found',
+                    style: AppTextStyles.titleLarge.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8.h),
+                  Text(
+                    'Match data is still loading...',
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
 
           final winner = sortedPlayers.first;
           final isWinner = winner.userId == currentUserId;

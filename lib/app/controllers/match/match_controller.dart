@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../models/match/match_model.dart';
@@ -57,6 +58,7 @@ class MatchController extends GetxController {
   final searchController = TextEditingController();
   DatabaseReference? _matchListener;
   DatabaseReference? _invitationsListener;
+  DatabaseReference? _notificationsListener; // Listen to notifications changes
   DatabaseReference? _answersListener;
   final GeminiService _geminiService = GeminiService();
 
@@ -72,6 +74,7 @@ class MatchController extends GetxController {
     searchController.dispose();
     _matchListener?.onDisconnect();
     _invitationsListener?.onDisconnect();
+    _notificationsListener?.onDisconnect();
     _answersListener?.onDisconnect();
     super.onClose();
   }
@@ -107,13 +110,19 @@ class MatchController extends GetxController {
       _invitationsListener?.onDisconnect();
       _invitationsListener = databaseRef!.child('matches');
       
-      _invitationsListener!.onValue.listen((event) {
+      _invitationsListener!.onValue.listen((event) async {
         if (event.snapshot.exists) {
           final matches = event.snapshot.value as Map<dynamic, dynamic>?;
           if (matches == null) {
             activeMatches.clear();
             return;
           }
+
+          // Get user's rejected/accepted notifications to filter matches
+          final notificationsSnapshot = await databaseRef!.child('notifications').child(currentUserId).get();
+          final notifications = notificationsSnapshot.exists 
+              ? Map<String, dynamic>.from(notificationsSnapshot.value as Map<dynamic, dynamic>)
+              : <String, dynamic>{};
 
           final matchesList = <Map<String, dynamic>>[];
           
@@ -128,11 +137,20 @@ class MatchController extends GetxController {
                     .toList() ??
                 [];
             
+            // Check if user has rejected this match
+            final notificationValue = notifications[matchId];
+            final notificationData = notificationValue != null 
+                ? Map<String, dynamic>.from(notificationValue as Map<dynamic, dynamic>)
+                : null;
+            final notificationStatus = notificationData?['status']?.toString() ?? 'pending';
+            final isRejected = notificationStatus == 'rejected' || rejectedMatchIds.contains(matchId);
+            
             // Only show matches that are:
             // - Not closed
             // - Waiting or starting status
             // - Not full (less than 4 players) OR just completed (to show winner)
             // - Not created by current user (or show if user is already in it)
+            // - NOT rejected by current user (unless user is creator or already in match)
             final createdBy = matchData['createdBy']?.toString() ?? '';
             final isUserInMatch = players.any((p) => p.userId == currentUserId);
             final isUserCreator = createdBy == currentUserId;
@@ -140,12 +158,12 @@ class MatchController extends GetxController {
             // Show match if:
             // 1. Not closed
             // 2. User is creator (to see their own matches) - ALWAYS show creator's matches
-            // 3. OR (status is waiting AND not locked AND user not in match AND has space)
+            // 3. OR (status is waiting AND not locked AND user not in match AND has space AND not rejected)
             // 4. OR (status is waiting AND user is in match) - show matches user joined
             // 5. OR (status is completed AND user was in match)
             final shouldShow = !isClosed && (
               isUserCreator || // Always show creator's matches
-              (status == 'waiting' && !isLocked && !isUserInMatch && players.length < 4) || // Available matches
+              (status == 'waiting' && !isLocked && !isUserInMatch && players.length < (matchData['maxPlayers'] as int? ?? 4) && !isRejected) || // Available matches (not rejected)
               (status == 'waiting' && isUserInMatch) || // Matches user joined
               (status == 'completed' && isUserInMatch) // Completed matches user was in
             );
@@ -191,6 +209,8 @@ class MatchController extends GetxController {
                 winnerName = players.firstWhereOrNull((p) => p.userId == winnerId)?.userName;
               }
               
+              final maxPlayers = matchData['maxPlayers'] as int? ?? 4;
+              
               matchesList.add({
                 'matchId': matchId,
                 'createdBy': creatorId,
@@ -201,7 +221,7 @@ class MatchController extends GetxController {
                 'isLocked': isLocked,
                 'isClosed': isClosed,
                 'playerCount': players.length,
-                'maxPlayers': 4,
+                'maxPlayers': maxPlayers,
                 'winnerName': winnerName,
                 'scores': scores,
                 'createdAt': matchData['createdAt'],
@@ -333,71 +353,108 @@ class MatchController extends GetxController {
       final currentUserId = FirebaseAuth.instance.currentUser?.uid;
       if (currentUserId == null) return;
 
-      // Listen to matches where current user is invited but not yet joined
+      // Listen to both matches AND notifications to get real-time updates
       _invitationsListener?.onDisconnect();
-      _invitationsListener = databaseRef!.child('matches');
+      _notificationsListener?.onDisconnect();
       
+      _invitationsListener = databaseRef!.child('matches');
+      _notificationsListener = databaseRef!.child('notifications').child(currentUserId);
+      
+      // Listen to matches changes
       _invitationsListener!.onValue.listen((event) async {
-        if (event.snapshot.exists) {
-          final matches = event.snapshot.value as Map<dynamic, dynamic>?;
-          if (matches == null) {
-            pendingInvitations.clear();
-            return;
-          }
-
-          // Get all notifications for current user from Firebase
-          final notificationsSnapshot = await databaseRef!.child('notifications').child(currentUserId).get();
-          final notifications = notificationsSnapshot.exists 
-              ? Map<String, dynamic>.from(notificationsSnapshot.value as Map<dynamic, dynamic>)
-              : <String, dynamic>{};
-
-          final invitations = <Map<String, dynamic>>[];
-          
-          for (var entry in matches.entries) {
-            final matchId = entry.key.toString();
-            final matchData = Map<String, dynamic>.from(entry.value as Map);
-            final status = matchData['status']?.toString() ?? '';
-            final players = (matchData['players'] as List<dynamic>?)
-                    ?.map((p) => MatchPlayer.fromJson(Map<String, dynamic>.from(p)))
-                    .toList() ??
-                [];
-            
-            // Check if this is an invitation for current user
-            final isInvited = matchData['createdBy']?.toString() != currentUserId;
-            final isNotJoined = !players.any((p) => p.userId == currentUserId);
-            final isWaiting = status == 'waiting';
-            final isNotClosed = !(matchData['isClosed'] ?? false);
-            
-            // Check notification status from Firebase
-            final notificationValue = notifications[matchId];
-            final notificationData = notificationValue != null 
-                ? Map<String, dynamic>.from(notificationValue as Map<dynamic, dynamic>)
-                : null;
-            final notificationStatus = notificationData?['status']?.toString() ?? 'pending';
-            final isRejected = notificationStatus == 'rejected' || rejectedMatchIds.contains(matchId);
-            final isAccepted = notificationStatus == 'accepted';
-            
-            // Show invitation if: invited, not joined, waiting, not rejected, not accepted, and not closed
-            if (isInvited && isNotJoined && isWaiting && !isRejected && !isAccepted && isNotClosed) {
-              // Get inviter info
-              final inviterId = matchData['createdBy']?.toString() ?? '';
-              final inviter = players.firstWhereOrNull((p) => p.userId == inviterId);
-              
-              invitations.add({
-                'matchId': matchId,
-                'inviterId': inviterId,
-                'inviterName': inviter?.userName ?? 'Someone',
-                'inviterAvatar': inviter?.userAvatar,
-                'createdAt': matchData['createdAt'],
-              });
-            }
-          }
-          
-          pendingInvitations.value = invitations;
-        }
+        await _updatePendingInvitations(currentUserId);
       });
+      
+      // Listen to notifications changes (when user accepts/rejects)
+      _notificationsListener!.onValue.listen((event) async {
+        await _updatePendingInvitations(currentUserId);
+      });
+      
+      // Initial load
+      await _updatePendingInvitations(currentUserId);
     } catch (e) {
       print('Error loading pending invitations: $e');
+    }
+  }
+  
+  /// Update pending invitations list based on current matches and notification status
+  Future<void> _updatePendingInvitations(String currentUserId) async {
+    try {
+      // Get all matches
+      final matchesSnapshot = await databaseRef!.child('matches').get();
+      if (!matchesSnapshot.exists) {
+        pendingInvitations.clear();
+        return;
+      }
+
+      final matches = matchesSnapshot.value as Map<dynamic, dynamic>?;
+      if (matches == null) {
+        pendingInvitations.clear();
+        return;
+      }
+
+      // Get all notifications for current user from Firebase (fresh data)
+      final notificationsSnapshot = await databaseRef!.child('notifications').child(currentUserId).get();
+      final notifications = notificationsSnapshot.exists 
+          ? Map<String, dynamic>.from(notificationsSnapshot.value as Map<dynamic, dynamic>)
+          : <String, dynamic>{};
+
+      final invitations = <Map<String, dynamic>>[];
+      
+      for (var entry in matches.entries) {
+        final matchId = entry.key.toString();
+        final matchData = Map<String, dynamic>.from(entry.value as Map);
+        final status = matchData['status']?.toString() ?? '';
+        final players = (matchData['players'] as List<dynamic>?)
+                ?.map((p) => MatchPlayer.fromJson(Map<String, dynamic>.from(p)))
+                .toList() ??
+            [];
+        
+        // Check if this is an invitation for current user
+        final isInvited = matchData['createdBy']?.toString() != currentUserId;
+        final isNotJoined = !players.any((p) => p.userId == currentUserId);
+        final isWaiting = status == 'waiting';
+        final isNotClosed = !(matchData['isClosed'] ?? false);
+        
+        // Check notification status from Firebase (always get fresh data)
+        final notificationValue = notifications[matchId];
+        final notificationData = notificationValue != null 
+            ? Map<String, dynamic>.from(notificationValue as Map<dynamic, dynamic>)
+            : null;
+        final notificationStatus = notificationData?['status']?.toString() ?? 'pending';
+        
+        // Also check local rejected list
+        final isRejected = notificationStatus == 'rejected' || rejectedMatchIds.contains(matchId);
+        final isAccepted = notificationStatus == 'accepted';
+        
+        // Show invitation if: invited, not joined, waiting, not rejected, not accepted, and not closed
+        if (isInvited && isNotJoined && isWaiting && !isRejected && !isAccepted && isNotClosed) {
+          // Get inviter info
+          final inviterId = matchData['createdBy']?.toString() ?? '';
+          final inviter = players.firstWhereOrNull((p) => p.userId == inviterId);
+          
+          // Check if notification is read
+          final isRead = notificationData?['isRead'] ?? false;
+          
+          invitations.add({
+            'matchId': matchId,
+            'inviterId': inviterId,
+            'inviterName': inviter?.userName ?? 'Someone',
+            'inviterAvatar': inviter?.userAvatar,
+            'createdAt': matchData['createdAt'],
+            'isRead': isRead,
+          });
+        }
+      }
+      
+      // Update the list (this will trigger UI update)
+      pendingInvitations.value = invitations;
+      
+      if (kDebugMode) {
+        print('📋 Updated pending invitations: ${invitations.length} invitations');
+      }
+    } catch (e) {
+      print('❌ Error updating pending invitations: $e');
     }
   }
 
@@ -405,6 +462,7 @@ class MatchController extends GetxController {
   Future<String?> createPublicMatch({
     String? categoryId,
     String? topicId,
+    int maxPlayers = 4, // Default to 4, can be 2 or 4
   }) async {
     if (!isFirebaseAvailable) {
       AppToast.showError('Firebase not available');
@@ -490,6 +548,7 @@ class MatchController extends GetxController {
         questions: matchQuestions,
         categoryId: categoryId,
         topicId: topicId,
+        maxPlayers: maxPlayers, // 2 or 4 players
       );
 
       // Save to Firebase
@@ -673,8 +732,11 @@ class MatchController extends GetxController {
         return;
       }
 
+      // Get max players from match data
+      final maxPlayers = matchData['maxPlayers'] as int? ?? 4;
+      
       // Check if match is full
-      if (players.length >= 4) {
+      if (players.length >= maxPlayers) {
         AppToast.showError('Match is full');
         return;
       }
@@ -694,8 +756,8 @@ class MatchController extends GetxController {
 
       players.add(newPlayer);
       
-      // Lock match if 4 players joined
-      final shouldLock = players.length >= 4;
+      // Lock match if max players joined
+      final shouldLock = players.length >= maxPlayers;
 
       await matchRef.update({
         'players': players.map((p) => p.toJson()).toList(),
@@ -757,13 +819,10 @@ class MatchController extends GetxController {
               _lastNavigationTime = now;
               Get.offNamed('/match-lobby', arguments: {'matchId': matchId});
             }
-          } else if (match.status == MatchStatus.completed && !isResultScreenShown.value) {
-            // Only navigate if not already on result screen
-            if (currentRoute != '/match-result') {
-              _lastNavigationTime = now;
-              isResultScreenShown.value = true;
-              Get.offNamed('/match-result', arguments: {'matchId': matchId});
-            }
+          } else if (match.status == MatchStatus.completed) {
+            // Don't auto-navigate to result screen - let user stay on result screen
+            // Navigation is handled by match_play_screen when match ends
+            // This prevents auto-navigation that user doesn't want
           }
         }
       }
@@ -803,7 +862,7 @@ class MatchController extends GetxController {
     });
   }
 
-  /// Start match (when 4 players are ready)
+  /// Start match (when 2 or 4 players are ready based on maxPlayers)
   Future<void> startMatch(String matchId) async {
     if (!isFirebaseAvailable) return;
 
@@ -831,24 +890,47 @@ class MatchController extends GetxController {
 
   /// Submit answer for current question
   Future<void> submitAnswer(String matchId, int questionIndex, int selectedIndex) async {
-    if (!isFirebaseAvailable) return;
+    if (!isFirebaseAvailable) {
+      print('⚠️ Firebase not available, cannot submit answer');
+      return;
+    }
 
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) return;
+      if (currentUser == null) {
+        print('⚠️ User not logged in, cannot submit answer');
+        return;
+      }
 
-      final questionId = currentMatch.value?.questions[questionIndex].questionId ?? '';
+      final match = currentMatch.value;
+      if (match == null) {
+        print('⚠️ Match is null, cannot submit answer');
+        return;
+      }
+
+      if (questionIndex < 0 || questionIndex >= match.questions.length) {
+        print('⚠️ Invalid question index: $questionIndex (total: ${match.questions.length})');
+        return;
+      }
+
+      final questionId = match.questions[questionIndex].questionId;
       playerAnswers[questionId] = selectedIndex;
+
+      print('💾 Submitting answer: User=${currentUser.uid}, Question=$questionId, Answer=$selectedIndex');
 
       // Update match with answer
       final matchRef = databaseRef!.child('matches').child(matchId);
       final answersRef = matchRef.child('answers').child(currentUser.uid).child(questionId);
+      
       await answersRef.set({
         'selectedIndex': selectedIndex,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
+      
+      print('✅ Answer submitted successfully to Firebase');
     } catch (e) {
-      print('Error submitting answer: $e');
+      print('❌ Error submitting answer: $e');
+      print('   Stack trace: ${StackTrace.current}');
     }
   }
 
@@ -891,33 +973,77 @@ class MatchController extends GetxController {
       
       final scores = <String, int>{};
       
+      // Initialize all players with 0 score
+      for (var player in match.players) {
+        scores[player.userId] = 0;
+      }
+      
       if (answersSnapshot.exists) {
         final answers = answersSnapshot.value as Map<dynamic, dynamic>;
+        print('📋 Found answers for ${answers.length} players');
+        print('📋 Match has ${match.questions.length} questions');
+        print('📋 Match players: ${match.players.map((p) => p.userId).toList()}');
         
         // Calculate scores for each player
         for (var playerEntry in answers.entries) {
           final playerId = playerEntry.key.toString();
           final playerAnswers = playerEntry.value as Map<dynamic, dynamic>;
+          print('📋 Player $playerId has ${playerAnswers.length} answers');
+          print('📋 Player $playerId answer keys: ${playerAnswers.keys.toList()}');
           int playerScore = 0;
 
-          for (var questionEntry in playerAnswers.entries) {
-            final questionId = questionEntry.key.toString();
-            final answerData = questionEntry.value as Map<dynamic, dynamic>;
-            final selectedIndex = answerData['selectedIndex'] as int? ?? -1;
-
-            // Find question
-            final question = match.questions.firstWhereOrNull(
-              (q) => q.questionId == questionId,
-            );
-
-            if (question != null && selectedIndex == question.correctAnswerIndex) {
-              playerScore++;
+          // Check each question in the match
+          for (var question in match.questions) {
+            final questionId = question.questionId;
+            final answerDataRaw = playerAnswers[questionId];
+            
+            if (answerDataRaw != null) {
+              // Handle different data types from Firebase
+              int selectedIndex = -1;
+              
+              try {
+                if (answerDataRaw is Map) {
+                  final answerData = Map<String, dynamic>.from(answerDataRaw);
+                  selectedIndex = answerData['selectedIndex'] as int? ?? -1;
+                } else if (answerDataRaw is int) {
+                  selectedIndex = answerDataRaw;
+                } else if (answerDataRaw is String) {
+                  selectedIndex = int.tryParse(answerDataRaw) ?? -1;
+                }
+              } catch (e) {
+                print('⚠️ Error parsing answer data for $playerId, question $questionId: $e');
+                selectedIndex = -1;
+              }
+              
+              // Only count if answer is correct (and not -1 which means no answer)
+              if (selectedIndex >= 0 && selectedIndex == question.correctAnswerIndex) {
+                playerScore++;
+                print('✅ Player $playerId: Question ${questionId} - Correct! (selected: $selectedIndex, correct: ${question.correctAnswerIndex})');
+              } else if (selectedIndex >= 0) {
+                print('❌ Player $playerId: Question ${questionId} - Wrong (selected: $selectedIndex, correct: ${question.correctAnswerIndex})');
+              } else {
+                print('⚠️ Player $playerId: Question ${questionId} - No answer (selected: $selectedIndex)');
+              }
+            } else {
+              print('⚠️ Player $playerId: Question ${questionId} - No answer data');
             }
           }
 
           scores[playerId] = playerScore;
+          print('📊 Calculated score for $playerId: $playerScore/${match.questions.length}');
+        }
+      } else {
+        print('⚠️ No answers found in match, all players get 0 score');
+      }
+      
+      // Ensure all players have scores (even if they didn't answer)
+      for (var player in match.players) {
+        if (!scores.containsKey(player.userId)) {
+          scores[player.userId] = 0;
         }
       }
+      
+      print('📊 Final scores: $scores');
 
       // Update match with scores and status (unlock when completed)
       await matchRef.update({
@@ -926,6 +1052,17 @@ class MatchController extends GetxController {
         'scores': scores,
         'isLocked': false, // Unlock when completed
       });
+      
+      print('✅ Match status updated to completed with scores: $scores');
+      
+      // Force refresh current match to get updated scores
+      final updatedSnapshot = await matchRef.get();
+      if (updatedSnapshot.exists) {
+        final updatedData = Map<String, dynamic>.from(updatedSnapshot.value as Map);
+        final updatedMatch = MatchModel.fromJson(updatedData, matchId);
+        currentMatch.value = updatedMatch;
+        print('✅ Current match refreshed with scores');
+      }
 
       // Update leaderboard for ALL players based on their scores (async)
       if (scores.isNotEmpty) {
@@ -959,8 +1096,32 @@ class MatchController extends GetxController {
                 userAvatar: player.userAvatar,
                 points: pointsToAdd,
                 testPassed: true,
-              ).then((_) {
+              ).then((_) async {
                 print('✅ Updated leaderboard for $playerId: +$pointsToAdd points');
+                
+                // Also update user profile with totalPoints
+                try {
+                  final userRef = databaseRef!.child('users').child(playerId);
+                  final userSnapshot = await userRef.child('totalPoints').get();
+                  
+                  if (userSnapshot.exists) {
+                    final currentProfilePoints = (userSnapshot.value as int? ?? 0);
+                    await userRef.update({
+                      'totalPoints': currentProfilePoints + pointsToAdd,
+                      'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+                    });
+                    print('✅ Updated profile points for $playerId: ${currentProfilePoints + pointsToAdd}');
+                  } else {
+                    // Set initial totalPoints if not exists
+                    await userRef.update({
+                      'totalPoints': pointsToAdd,
+                      'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+                    });
+                    print('✅ Set initial profile points for $playerId: $pointsToAdd');
+                  }
+                } catch (e) {
+                  print('⚠️ Error updating profile points for $playerId: $e');
+                }
               }).catchError((e) {
                 print('❌ Error updating leaderboard for $playerId: $e');
               }),
@@ -1194,26 +1355,104 @@ class MatchController extends GetxController {
         // Reject - Mark notification as rejected in Firebase
         final currentUserId = FirebaseAuth.instance.currentUser?.uid;
         if (currentUserId != null) {
-          // Update notification status in Firebase
-          await databaseRef!.child('notifications').child(currentUserId).child(matchId).update({
+          // Update notification status in Firebase (use set to ensure it's saved)
+          await databaseRef!.child('notifications').child(currentUserId).child(matchId).set({
+            'matchId': matchId,
             'status': 'rejected',
             'rejectedAt': DateTime.now().millisecondsSinceEpoch,
+            'updatedAt': DateTime.now().millisecondsSinceEpoch,
           });
         }
         
         // Also add to local rejected list
         rejectedMatchIds.add(matchId);
         
+        // Immediately remove from pending invitations list (don't wait for listener)
+        pendingInvitations.removeWhere((invitation) => invitation['matchId'] == matchId);
+        
         print('✅ User rejected match invitation: $matchId (notification marked as rejected)');
         AppToast.showInfo('Match invitation rejected');
         
-        // Refresh pending invitations to remove this from user's list
-        await loadPendingInvitations();
+        // Force refresh pending invitations to ensure sync with Firebase
+        // This will trigger _updatePendingInvitations which reads fresh data
+        final currentUserIdForRefresh = FirebaseAuth.instance.currentUser?.uid;
+        if (currentUserIdForRefresh != null) {
+          await _updatePendingInvitations(currentUserIdForRefresh);
+        }
       }
     } catch (e) {
       print('❌ Error handling match invitation response: $e');
       print('   Stack trace: ${StackTrace.current}');
       AppToast.showError('Failed to handle invitation: ${e.toString()}');
+    }
+  }
+
+  /// Mark a notification as read
+  Future<void> markNotificationAsRead(String matchId) async {
+    if (!isFirebaseAvailable) return;
+
+    try {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      // Update notification in Firebase
+      await databaseRef!.child('notifications').child(currentUserId).child(matchId).update({
+        'isRead': true,
+        'readAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // Update local list
+      final invitationIndex = pendingInvitations.indexWhere(
+        (inv) => inv['matchId'] == matchId,
+      );
+      if (invitationIndex != -1) {
+        pendingInvitations[invitationIndex]['isRead'] = true;
+        pendingInvitations.refresh();
+      }
+
+      if (kDebugMode) {
+        print('✅ Notification marked as read: $matchId');
+      }
+    } catch (e) {
+      print('❌ Error marking notification as read: $e');
+    }
+  }
+
+  /// Mark all notifications as read
+  Future<void> markAllNotificationsAsRead() async {
+    if (!isFirebaseAvailable) return;
+
+    try {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      // Mark all pending invitations as read
+      final updatePromises = <Future>[];
+      for (var invitation in pendingInvitations) {
+        final matchId = invitation['matchId'] as String;
+        final isRead = invitation['isRead'] ?? false;
+        
+        if (!isRead) {
+          updatePromises.add(
+            databaseRef!.child('notifications').child(currentUserId).child(matchId).update({
+              'isRead': true,
+              'readAt': DateTime.now().millisecondsSinceEpoch,
+            }),
+          );
+          
+          // Update local list
+          invitation['isRead'] = true;
+        }
+      }
+
+      await Future.wait(updatePromises);
+      pendingInvitations.refresh();
+
+      if (kDebugMode) {
+        print('✅ All notifications marked as read');
+      }
+    } catch (e) {
+      print('❌ Error marking all notifications as read: $e');
     }
   }
 
