@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "39592817605",
+    "firebase_url": "https://afn-test-default-rtdb.firebaseio.com",
+    "project_id": "afn-test",
+    "storage_bucket": "afn-test.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39592817605:android:bdb598f6569295342f11ac",
+        "android_client_info": {
+          "package_name": "com.example.afn"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "39592817605-tuj10rvq8rc1c7cd4uhhk042vkecbeuu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQeqg9Wbpnho9jF7j7kZoYYCr8s03Tjuw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "39592817605-tuj10rvq8rc1c7cd4uhhk042vkecbeuu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
