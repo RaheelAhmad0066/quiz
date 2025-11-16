@@ -157,24 +157,26 @@ class MatchController extends GetxController {
             
             // Show match if:
             // 1. Not closed
-            // 2. User is creator (to see their own matches) - ALWAYS show creator's matches
+            // 2. User is creator (to see their own matches) - ALWAYS show creator's matches (but not completed)
             // 3. OR (status is waiting AND not locked AND user not in match AND has space AND not rejected)
             // 4. OR (status is waiting AND user is in match) - show matches user joined
-            // 5. OR (status is completed AND user was in match)
-            final shouldShow = !isClosed && (
-              isUserCreator || // Always show creator's matches
+            // NOTE: Completed matches are NOT shown in match list (only in profile history)
+            final shouldShow = !isClosed && status != 'completed' && (
+              (isUserCreator && status == 'waiting') || // Creator's active matches only
               (status == 'waiting' && !isLocked && !isUserInMatch && players.length < (matchData['maxPlayers'] as int? ?? 4) && !isRejected) || // Available matches (not rejected)
-              (status == 'waiting' && isUserInMatch) || // Matches user joined
-              (status == 'completed' && isUserInMatch) // Completed matches user was in
+              (status == 'waiting' && isUserInMatch) // Matches user joined
             );
             
             if (shouldShow) {
-              // Get creator info from leaderboard
+              // Get creator info - First try from match data (creatorStats), then fallback to leaderboard
               final creatorId = createdBy;
               Map<String, dynamic> creatorInfo = {
                 'userName': 'Unknown',
                 'userAvatar': null,
                 'totalPoints': 0,
+                'matchesWon': 0,
+                'testsCompleted': 0,
+                'rank': null,
               };
               
               // Try to get creator info from players first
@@ -183,19 +185,82 @@ class MatchController extends GetxController {
                 creatorInfo = {
                   'userName': creatorPlayer.userName,
                   'userAvatar': creatorPlayer.userAvatar,
-                  'totalPoints': 0, // Will fetch from leaderboard
+                  'totalPoints': 0,
+                  'matchesWon': 0,
+                  'testsCompleted': 0,
+                  'rank': null,
                 };
               }
               
-              // Get creator points from leaderboard (async in stream - use then)
-              databaseRef!.child('leaderboard').child('allTime').child(creatorId).get().then((snapshot) {
-                if (snapshot.exists) {
-                  final leaderboardData = Map<String, dynamic>.from(snapshot.value as Map);
-                  creatorInfo['totalPoints'] = leaderboardData['totalPoints'] ?? 0;
+              // First, try to get stats from match data (creatorStats) - saved when match was created
+              final creatorStats = matchData['creatorStats'] as Map<dynamic, dynamic>?;
+              if (creatorStats != null) {
+                final stats = Map<String, dynamic>.from(creatorStats);
+                creatorInfo['totalPoints'] = stats['totalPoints'] ?? 0;
+                creatorInfo['matchesWon'] = stats['matchesWon'] ?? 0;
+                creatorInfo['testsCompleted'] = stats['testsCompleted'] ?? 0;
+                creatorInfo['rank'] = stats['rank'];
+                print('✅ Using creator stats from match data: $stats');
+              } else {
+                // Fallback: Get creator stats from leaderboard (await to get data)
+                try {
+                  final leaderboardSnapshot = await databaseRef!.child('leaderboard').child('allTime').child(creatorId).get();
+                  if (leaderboardSnapshot.exists) {
+                    final leaderboardData = Map<String, dynamic>.from(leaderboardSnapshot.value as Map);
+                    creatorInfo['totalPoints'] = leaderboardData['totalPoints'] ?? 0;
+                    creatorInfo['matchesWon'] = leaderboardData['matchesWon'] ?? 0;
+                    creatorInfo['testsCompleted'] = leaderboardData['testsCompleted'] ?? 0;
+                  }
+                } catch (e) {
+                  print('Error fetching creator stats from leaderboard: $e');
                 }
-              }).catchError((e) {
-                print('Error fetching creator points: $e');
-              });
+                
+                // Get rank from leaderboard (await to get data)
+                try {
+                  final allSnapshot = await databaseRef!.child('leaderboard').child('allTime').get();
+                  if (allSnapshot.exists) {
+                    final allData = allSnapshot.value as Map<dynamic, dynamic>?;
+                    if (allData != null) {
+                      // Sort by totalPoints descending
+                      final sorted = allData.entries.toList()
+                        ..sort((a, b) {
+                          final aData = Map<String, dynamic>.from(a.value as Map);
+                          final bData = Map<String, dynamic>.from(b.value as Map);
+                          final aPoints = aData['totalPoints'] as int? ?? 0;
+                          final bPoints = bData['totalPoints'] as int? ?? 0;
+                          return bPoints.compareTo(aPoints);
+                        });
+                      
+                      // Find creator's rank
+                      final rankIndex = sorted.indexWhere((entry) => entry.key.toString() == creatorId);
+                      if (rankIndex >= 0) {
+                        creatorInfo['rank'] = rankIndex + 1;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  print('Error fetching rank: $e');
+                }
+                
+                // Also try to get from users node (await to get data)
+                try {
+                  final userSnapshot = await databaseRef!.child('users').child(creatorId).get();
+                  if (userSnapshot.exists) {
+                    final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+                    if (creatorInfo['totalPoints'] == 0) {
+                      creatorInfo['totalPoints'] = userData['totalPoints'] ?? 0;
+                    }
+                    if (creatorInfo['matchesWon'] == null || creatorInfo['matchesWon'] == 0) {
+                      creatorInfo['matchesWon'] = userData['matchesWon'] ?? 0;
+                    }
+                    if (creatorInfo['testsCompleted'] == null || creatorInfo['testsCompleted'] == 0) {
+                      creatorInfo['testsCompleted'] = userData['testsCompleted'] ?? 0;
+                    }
+                  }
+                } catch (e) {
+                  // Ignore error, use leaderboard data
+                }
+              }
               
               // Get winner info
               final scores = matchData['scores'] != null 
@@ -216,7 +281,10 @@ class MatchController extends GetxController {
                 'createdBy': creatorId,
                 'creatorName': creatorInfo['userName'],
                 'creatorAvatar': creatorInfo['userAvatar'],
-                'creatorPoints': creatorInfo['totalPoints'],
+                'creatorPoints': creatorInfo['totalPoints'] as int,
+                'creatorWins': creatorInfo['matchesWon'] as int?,
+                'creatorRank': creatorInfo['rank'] as int?,
+                'creatorTestsCompleted': creatorInfo['testsCompleted'] as int?,
                 'status': status,
                 'isLocked': isLocked,
                 'isClosed': isClosed,
@@ -551,18 +619,75 @@ class MatchController extends GetxController {
         maxPlayers: maxPlayers, // 2 or 4 players
       );
 
+      // Get creator stats from leaderboard/users to save with match
+      int creatorPoints = 0;
+      int creatorWins = 0;
+      int creatorTestsCompleted = 0;
+      int? creatorRank;
+      
+      try {
+        // Get from leaderboard
+        final leaderboardSnapshot = await databaseRef!.child('leaderboard').child('allTime').child(currentUser.uid).get();
+        if (leaderboardSnapshot.exists) {
+          final leaderboardData = Map<String, dynamic>.from(leaderboardSnapshot.value as Map);
+          creatorPoints = leaderboardData['totalPoints'] ?? 0;
+          creatorWins = leaderboardData['matchesWon'] ?? 0;
+          creatorTestsCompleted = leaderboardData['testsCompleted'] ?? 0;
+        }
+        
+        // Get rank
+        final allSnapshot = await databaseRef!.child('leaderboard').child('allTime').get();
+        if (allSnapshot.exists) {
+          final allData = allSnapshot.value as Map<dynamic, dynamic>?;
+          if (allData != null) {
+            final sorted = allData.entries.toList()
+              ..sort((a, b) {
+                final aData = Map<String, dynamic>.from(a.value as Map);
+                final bData = Map<String, dynamic>.from(b.value as Map);
+                final aPoints = aData['totalPoints'] as int? ?? 0;
+                final bPoints = bData['totalPoints'] as int? ?? 0;
+                return bPoints.compareTo(aPoints);
+              });
+            final rankIndex = sorted.indexWhere((entry) => entry.key.toString() == currentUser.uid);
+            if (rankIndex >= 0) {
+              creatorRank = rankIndex + 1;
+            }
+          }
+        }
+        
+        // Fallback to users node if leaderboard doesn't have data
+        if (creatorPoints == 0) {
+          final userSnapshot = await databaseRef!.child('users').child(currentUser.uid).get();
+          if (userSnapshot.exists) {
+            final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+            creatorPoints = userData['totalPoints'] ?? 0;
+            creatorWins = userData['matchesWon'] ?? 0;
+            creatorTestsCompleted = userData['testsCompleted'] ?? 0;
+          }
+        }
+      } catch (e) {
+        print('⚠️ Error fetching creator stats: $e');
+      }
+
       // Save to Firebase
       final matchRef = databaseRef!.child('matches').push();
       final matchId = matchRef.key!;
 
-      // Ensure createdBy is explicitly set
+      // Ensure createdBy is explicitly set and include creator stats
       final matchData = {
         ...match.toJson(),
         'matchId': matchId,
         'createdBy': currentUser.uid, // Explicitly set to ensure it's saved
+        'creatorStats': {
+          'totalPoints': creatorPoints,
+          'matchesWon': creatorWins,
+          'testsCompleted': creatorTestsCompleted,
+          'rank': creatorRank,
+        },
       };
       
       print('✅ Creating public match with createdBy: ${currentUser.uid}');
+      print('✅ Creator stats: Points=$creatorPoints, Wins=$creatorWins, Tests=$creatorTestsCompleted, Rank=$creatorRank');
       await matchRef.set(matchData);
 
       // Send notifications to all available users
@@ -669,18 +794,75 @@ class MatchController extends GetxController {
         topicId: topicId,
       );
 
+      // Get creator stats from leaderboard/users to save with match
+      int creatorPoints = 0;
+      int creatorWins = 0;
+      int creatorTestsCompleted = 0;
+      int? creatorRank;
+      
+      try {
+        // Get from leaderboard
+        final leaderboardSnapshot = await databaseRef!.child('leaderboard').child('allTime').child(currentUser.uid).get();
+        if (leaderboardSnapshot.exists) {
+          final leaderboardData = Map<String, dynamic>.from(leaderboardSnapshot.value as Map);
+          creatorPoints = leaderboardData['totalPoints'] ?? 0;
+          creatorWins = leaderboardData['matchesWon'] ?? 0;
+          creatorTestsCompleted = leaderboardData['testsCompleted'] ?? 0;
+        }
+        
+        // Get rank
+        final allSnapshot = await databaseRef!.child('leaderboard').child('allTime').get();
+        if (allSnapshot.exists) {
+          final allData = allSnapshot.value as Map<dynamic, dynamic>?;
+          if (allData != null) {
+            final sorted = allData.entries.toList()
+              ..sort((a, b) {
+                final aData = Map<String, dynamic>.from(a.value as Map);
+                final bData = Map<String, dynamic>.from(b.value as Map);
+                final aPoints = aData['totalPoints'] as int? ?? 0;
+                final bPoints = bData['totalPoints'] as int? ?? 0;
+                return bPoints.compareTo(aPoints);
+              });
+            final rankIndex = sorted.indexWhere((entry) => entry.key.toString() == currentUser.uid);
+            if (rankIndex >= 0) {
+              creatorRank = rankIndex + 1;
+            }
+          }
+        }
+        
+        // Fallback to users node if leaderboard doesn't have data
+        if (creatorPoints == 0) {
+          final userSnapshot = await databaseRef!.child('users').child(currentUser.uid).get();
+          if (userSnapshot.exists) {
+            final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+            creatorPoints = userData['totalPoints'] ?? 0;
+            creatorWins = userData['matchesWon'] ?? 0;
+            creatorTestsCompleted = userData['testsCompleted'] ?? 0;
+          }
+        }
+      } catch (e) {
+        print('⚠️ Error fetching creator stats: $e');
+      }
+
       // Save to Firebase
       final matchRef = databaseRef!.child('matches').push();
       final matchId = matchRef.key!;
 
-      // Ensure createdBy is explicitly set
+      // Ensure createdBy is explicitly set and include creator stats
       final matchData = {
         ...match.toJson(),
         'matchId': matchId,
         'createdBy': currentUser.uid, // Explicitly set to ensure it's saved
+        'creatorStats': {
+          'totalPoints': creatorPoints,
+          'matchesWon': creatorWins,
+          'testsCompleted': creatorTestsCompleted,
+          'rank': creatorRank,
+        },
       };
       
       print('✅ Creating match with createdBy: ${currentUser.uid}');
+      print('✅ Creator stats: Points=$creatorPoints, Wins=$creatorWins, Tests=$creatorTestsCompleted, Rank=$creatorRank');
       await matchRef.set(matchData);
 
       // Send notification to opponent first
@@ -914,6 +1096,7 @@ class MatchController extends GetxController {
       }
 
       final questionId = match.questions[questionIndex].questionId;
+      final question = match.questions[questionIndex];
       playerAnswers[questionId] = selectedIndex;
 
       print('💾 Submitting answer: User=${currentUser.uid}, Question=$questionId, Answer=$selectedIndex');
@@ -928,9 +1111,76 @@ class MatchController extends GetxController {
       });
       
       print('✅ Answer submitted successfully to Firebase');
+      
+      // Update score in real-time in matchScores collection
+      await _updatePlayerScoreRealTime(matchId, currentUser.uid, question, selectedIndex);
     } catch (e) {
       print('❌ Error submitting answer: $e');
       print('   Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  /// Update player score in real-time when answer is submitted
+  Future<void> _updatePlayerScoreRealTime(
+    String matchId,
+    String playerId,
+    MatchQuestion question,
+    int selectedIndex,
+  ) async {
+    if (!isFirebaseAvailable) return;
+    
+    try {
+      final scoresRef = databaseRef!.child('matchScores').child(matchId).child('scores');
+      
+      // Get current score for this player
+      final currentScoreSnapshot = await scoresRef.child(playerId).get();
+      int currentScore = 0;
+      
+      if (currentScoreSnapshot.exists) {
+        final scoreValue = currentScoreSnapshot.value;
+        if (scoreValue is int) {
+          currentScore = scoreValue;
+        } else if (scoreValue is String) {
+          currentScore = int.tryParse(scoreValue) ?? 0;
+        }
+      }
+      
+      // Check if answer is correct
+      final isCorrect = selectedIndex >= 0 && selectedIndex == question.correctAnswerIndex;
+      
+      if (isCorrect) {
+        // Increment score
+        final newScore = currentScore + 1;
+        await scoresRef.child(playerId).set(newScore);
+        print('✅ Real-time score update: $playerId = $newScore (correct answer)');
+      } else {
+        // Ensure score exists (even if 0)
+        if (!currentScoreSnapshot.exists) {
+          await scoresRef.child(playerId).set(0);
+        }
+        print('📊 Real-time score update: $playerId = $currentScore (wrong answer)');
+      }
+      
+      // Also update match metadata if not exists
+      final matchMetaRef = databaseRef!.child('matchScores').child(matchId);
+      final match = currentMatch.value;
+      if (match != null) {
+        final metaSnapshot = await matchMetaRef.child('matchId').get();
+        if (!metaSnapshot.exists) {
+          await matchMetaRef.update({
+            'matchId': matchId,
+            'createdBy': match.createdBy,
+            'players': match.players.map((p) => {
+              'userId': p.userId,
+              'userName': p.userName,
+              'userAvatar': p.userAvatar,
+              'userEmail': p.userEmail,
+            }).toList(),
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ Error updating real-time score: $e');
     }
   }
 
@@ -990,12 +1240,19 @@ class MatchController extends GetxController {
           final playerAnswers = playerEntry.value as Map<dynamic, dynamic>;
           print('📋 Player $playerId has ${playerAnswers.length} answers');
           print('📋 Player $playerId answer keys: ${playerAnswers.keys.toList()}');
+          print('📋 Match has ${match.questions.length} questions');
+          print('📋 Match question IDs: ${match.questions.map((q) => q.questionId).toList()}');
+          
           int playerScore = 0;
 
           // Check each question in the match
           for (var question in match.questions) {
             final questionId = question.questionId;
             final answerDataRaw = playerAnswers[questionId];
+            
+            print('🔍 Checking Player $playerId, Question $questionId...');
+            print('   Answer data type: ${answerDataRaw.runtimeType}');
+            print('   Answer data: $answerDataRaw');
             
             if (answerDataRaw != null) {
               // Handle different data types from Firebase
@@ -1005,10 +1262,15 @@ class MatchController extends GetxController {
                 if (answerDataRaw is Map) {
                   final answerData = Map<String, dynamic>.from(answerDataRaw);
                   selectedIndex = answerData['selectedIndex'] as int? ?? -1;
+                  print('   Parsed from Map: selectedIndex = $selectedIndex');
                 } else if (answerDataRaw is int) {
                   selectedIndex = answerDataRaw;
+                  print('   Parsed from int: selectedIndex = $selectedIndex');
                 } else if (answerDataRaw is String) {
                   selectedIndex = int.tryParse(answerDataRaw) ?? -1;
+                  print('   Parsed from String: selectedIndex = $selectedIndex');
+                } else {
+                  print('   ⚠️ Unknown data type: ${answerDataRaw.runtimeType}');
                 }
               } catch (e) {
                 print('⚠️ Error parsing answer data for $playerId, question $questionId: $e');
@@ -1025,12 +1287,13 @@ class MatchController extends GetxController {
                 print('⚠️ Player $playerId: Question ${questionId} - No answer (selected: $selectedIndex)');
               }
             } else {
-              print('⚠️ Player $playerId: Question ${questionId} - No answer data');
+              print('⚠️ Player $playerId: Question ${questionId} - No answer data (key not found in playerAnswers)');
             }
           }
 
           scores[playerId] = playerScore;
           print('📊 Calculated score for $playerId: $playerScore/${match.questions.length}');
+          print('📊 Updated scores map: $scores');
         }
       } else {
         print('⚠️ No answers found in match, all players get 0 score');
@@ -1044,25 +1307,92 @@ class MatchController extends GetxController {
       }
       
       print('📊 Final scores: $scores');
+      print('📊 Scores map details:');
+      for (var entry in scores.entries) {
+        print('   ${entry.key}: ${entry.value}');
+      }
 
-      // Update match with scores and status (unlock when completed)
-      await matchRef.update({
-        'status': MatchStatus.completed.toString(),
-        'endedAt': DateTime.now().millisecondsSinceEpoch,
-        'scores': scores,
-        'isLocked': false, // Unlock when completed
+      // Find winner (player with highest score)
+      String? winnerId;
+      if (scores.isNotEmpty) {
+        final sortedScores = scores.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        winnerId = sortedScores.first.key;
+        print('🏆 Winner: $winnerId with score ${sortedScores.first.value}');
+      }
+
+      // Update matchScores collection with final scores and metadata
+      // Scores are already being updated in real-time, just finalize here
+      final scoresRef = databaseRef!.child('matchScores').child(matchId);
+      
+      // Get current scores from matchScores (real-time updated)
+      final currentScoresSnapshot = await scoresRef.child('scores').get();
+      Map<String, int> finalScores = {};
+      
+      if (currentScoresSnapshot.exists) {
+        final currentScores = currentScoresSnapshot.value as Map<dynamic, dynamic>?;
+        if (currentScores != null) {
+          for (var entry in currentScores.entries) {
+            final playerId = entry.key.toString();
+            final scoreValue = entry.value;
+            if (scoreValue is int) {
+              finalScores[playerId] = scoreValue;
+            } else if (scoreValue is String) {
+              finalScores[playerId] = int.tryParse(scoreValue) ?? 0;
+            }
+          }
+        }
+      }
+      
+      // If real-time scores not found, use calculated scores
+      if (finalScores.isEmpty) {
+        finalScores = scores;
+        await scoresRef.child('scores').set(scores);
+        print('💾 Saved calculated scores to matchScores: $scores');
+      } else {
+        // Ensure all players have scores
+        for (var player in match.players) {
+          if (!finalScores.containsKey(player.userId)) {
+            finalScores[player.userId] = 0;
+          }
+        }
+        // Update with final calculated scores (in case of any discrepancy)
+        await scoresRef.child('scores').set(finalScores);
+        print('💾 Updated matchScores with final scores: $finalScores');
+      }
+      
+      // Update match metadata
+      await scoresRef.update({
+        'matchId': matchId,
+        'createdBy': match.createdBy,
+        'completedAt': DateTime.now().millisecondsSinceEpoch,
+        'winnerId': winnerId ?? '',
+        'players': match.players.map((p) => {
+          'userId': p.userId,
+          'userName': p.userName,
+          'userAvatar': p.userAvatar,
+          'userEmail': p.userEmail,
+        }).toList(),
       });
       
-      print('✅ Match status updated to completed with scores: $scores');
+      print('✅ Final scores in matchScores: $finalScores');
       
-      // Force refresh current match to get updated scores
-      final updatedSnapshot = await matchRef.get();
-      if (updatedSnapshot.exists) {
-        final updatedData = Map<String, dynamic>.from(updatedSnapshot.value as Map);
-        final updatedMatch = MatchModel.fromJson(updatedData, matchId);
-        currentMatch.value = updatedMatch;
-        print('✅ Current match refreshed with scores');
+      // Verify scores were saved correctly
+      final verifySnapshot = await scoresRef.child('scores').get();
+      if (verifySnapshot.exists) {
+        final savedScores = verifySnapshot.value;
+        print('✅ Verified scores in DB: $savedScores');
+      } else {
+        print('❌ ERROR: Scores not found after saving!');
       }
+
+      // Delete match from matches collection after saving scores
+      // Scores are now in matchScores collection, so match can be deleted
+      await matchRef.remove();
+      print('✅ Match deleted from matches collection (scores saved in matchScores)');
+      
+      // Clear current match from controller
+      currentMatch.value = null;
 
       // Update leaderboard for ALL players based on their scores (async)
       if (scores.isNotEmpty) {
@@ -1081,8 +1411,9 @@ class MatchController extends GetxController {
           final playerId = scoreEntry.key;
           final playerScore = scoreEntry.value; // Number of correct answers
           final pointsToAdd = playerScore * 10; // 10 points per correct answer
+          final isWinner = playerId == winnerId;
           
-          print('📊 Player $playerId: Score = $playerScore correct answers = $pointsToAdd points');
+          print('📊 Player $playerId: Score = $playerScore correct answers = $pointsToAdd points, Winner: $isWinner');
           
           // Get player info from match
           final player = match.players.firstWhereOrNull((p) => p.userId == playerId);
@@ -1096,31 +1427,132 @@ class MatchController extends GetxController {
                 userAvatar: player.userAvatar,
                 points: pointsToAdd,
                 testPassed: true,
+                isMatchWinner: isWinner, // Pass winner flag
               ).then((_) async {
-                print('✅ Updated leaderboard for $playerId: +$pointsToAdd points');
+                print('✅ Updated leaderboard for $playerId: +$pointsToAdd points, Winner: $isWinner');
                 
-                // Also update user profile with totalPoints
+                // Also update user profile with totalPoints and matchesWon
                 try {
                   final userRef = databaseRef!.child('users').child(playerId);
-                  final userSnapshot = await userRef.child('totalPoints').get();
+                  final userSnapshot = await userRef.get();
                   
                   if (userSnapshot.exists) {
-                    final currentProfilePoints = (userSnapshot.value as int? ?? 0);
+                    final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+                    final currentProfilePoints = (userData['totalPoints'] as int? ?? 0);
+                    final currentMatchesWon = (userData['matchesWon'] as int? ?? 0);
+                    
+                    // Get opponent info for match history (all opponents)
+                    final opponents = match.players.where((p) => p.userId != playerId).toList();
+                    final opponentsList = <Map<String, dynamic>>[];
+                    for (var p in opponents) {
+                      opponentsList.add({
+                        'userId': p.userId,
+                        'userName': p.userName,
+                        'userAvatar': p.userAvatar,
+                        'score': scores[p.userId] ?? 0,
+                      });
+                    }
+                    
+                    // Get highest scoring opponent for display
+                    Map<String, dynamic>? topOpponent;
+                    if (opponentsList.isNotEmpty) {
+                      topOpponent = opponentsList.first;
+                      for (var opp in opponentsList) {
+                        if ((opp['score'] as int) > (topOpponent!['score'] as int)) {
+                          topOpponent = opp;
+                        }
+                      }
+                    }
+                    
+                    // Create match history entry
+                    final matchHistoryEntry = {
+                      'matchId': matchId,
+                      'opponents': opponentsList, // All opponents
+                      'opponent': topOpponent != null ? {
+                        'userId': topOpponent['userId'],
+                        'userName': topOpponent['userName'],
+                        'userAvatar': topOpponent['userAvatar'],
+                      } : null, // Top opponent for display
+                      'myScore': playerScore,
+                      'opponentScore': topOpponent != null 
+                          ? (topOpponent['score'] as int)
+                          : 0,
+                      'isWinner': isWinner,
+                      'pointsEarned': pointsToAdd,
+                      'completedAt': DateTime.now().millisecondsSinceEpoch,
+                    };
+                    
+                    // Get existing match history
+                    final matchHistory = (userData['matchHistory'] as List<dynamic>?) ?? [];
+                    final updatedHistory = List<Map<String, dynamic>>.from(
+                      matchHistory.map((e) => Map<String, dynamic>.from(e))
+                    );
+                    
+                    // Add new match to history (at the beginning)
+                    updatedHistory.insert(0, matchHistoryEntry);
+                    
+                    // Keep only last 50 matches
+                    if (updatedHistory.length > 50) {
+                      updatedHistory.removeRange(50, updatedHistory.length);
+                    }
+                    
                     await userRef.update({
                       'totalPoints': currentProfilePoints + pointsToAdd,
+                      'matchesWon': isWinner ? currentMatchesWon + 1 : currentMatchesWon,
+                      'matchHistory': updatedHistory,
                       'lastUpdated': DateTime.now().millisecondsSinceEpoch,
                     });
-                    print('✅ Updated profile points for $playerId: ${currentProfilePoints + pointsToAdd}');
+                    print('✅ Updated profile for $playerId: Points=${currentProfilePoints + pointsToAdd}, Wins=${isWinner ? currentMatchesWon + 1 : currentMatchesWon}');
                   } else {
-                    // Set initial totalPoints if not exists
+                    // Set initial values if not exists
+                    final opponents = match.players.where((p) => p.userId != playerId).toList();
+                    final opponentsList = <Map<String, dynamic>>[];
+                    for (var p in opponents) {
+                      opponentsList.add({
+                        'userId': p.userId,
+                        'userName': p.userName,
+                        'userAvatar': p.userAvatar,
+                        'score': scores[p.userId] ?? 0,
+                      });
+                    }
+                    
+                    Map<String, dynamic>? topOpponent;
+                    if (opponentsList.isNotEmpty) {
+                      topOpponent = opponentsList.first;
+                      for (var opp in opponentsList) {
+                        if ((opp['score'] as int) > (topOpponent!['score'] as int)) {
+                          topOpponent = opp;
+                        }
+                      }
+                    }
+                    
+                    final matchHistoryEntry = {
+                      'matchId': matchId,
+                      'opponents': opponentsList,
+                      'opponent': topOpponent != null ? {
+                        'userId': topOpponent['userId'],
+                        'userName': topOpponent['userName'],
+                        'userAvatar': topOpponent['userAvatar'],
+                      } : null,
+                      'myScore': playerScore,
+                      'opponentScore': topOpponent != null 
+                          ? (topOpponent['score'] as int)
+                          : 0,
+                      'isWinner': isWinner,
+                      'pointsEarned': pointsToAdd,
+                      'completedAt': DateTime.now().millisecondsSinceEpoch,
+                    };
+                    
                     await userRef.update({
                       'totalPoints': pointsToAdd,
+                      'matchesWon': isWinner ? 1 : 0,
+                      'matchHistory': [matchHistoryEntry],
                       'lastUpdated': DateTime.now().millisecondsSinceEpoch,
                     });
-                    print('✅ Set initial profile points for $playerId: $pointsToAdd');
+                    print('✅ Set initial profile for $playerId: Points=$pointsToAdd, Wins=${isWinner ? 1 : 0}');
                   }
                 } catch (e) {
-                  print('⚠️ Error updating profile points for $playerId: $e');
+                  print('⚠️ Error updating profile for $playerId: $e');
                 }
               }).catchError((e) {
                 print('❌ Error updating leaderboard for $playerId: $e');

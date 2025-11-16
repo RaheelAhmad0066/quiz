@@ -13,6 +13,7 @@ import 'package:afn_test/app/screens/quiz/score_screen.dart';
 import 'package:afn_test/app/screens/pages/profile/about_screen.dart';
 import 'package:afn_test/app/screens/pages/profile/settings_screen.dart';
 import 'package:afn_test/app/screens/pages/profile/privacy_policy_screen.dart';
+import 'package:afn_test/app/screens/pages/profile/match_history_screen.dart';
 import 'package:afn_test/app/screens/pages/match/screens/match_list_screen.dart';
 import 'package:afn_test/app/screens/pages/match/screens/match_lobby_screen.dart';
 import 'package:afn_test/app/screens/pages/match/screens/match_play_screen.dart';
@@ -163,6 +164,12 @@ class AppPages {
     GetPage(
       name: AppRoutes.privacyPolicy,
       page: () => const PrivacyPolicyScreen(),
+    ),
+
+    // Match History Screen
+    GetPage(
+      name: AppRoutes.matchHistory,
+      page: () => const MatchHistoryScreen(),
     ),
 
     // Match List Screen

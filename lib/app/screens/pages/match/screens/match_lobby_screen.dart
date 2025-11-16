@@ -4,6 +4,7 @@ import 'package:afn_test/app/app_widgets/spinkit_loadder.dart';
 import 'package:afn_test/app/controllers/match/match_controller.dart';
 import 'package:afn_test/app/models/match/match_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
@@ -25,12 +26,57 @@ class MatchLobbyScreen extends StatefulWidget {
 
 class _MatchLobbyScreenState extends State<MatchLobbyScreen> {
   final controller = Get.put(MatchController());
+  final Map<String, Map<String, dynamic>> _playerStats = {}; // userId -> {totalPoints, matchesWon}
 
   @override
   void initState() {
     super.initState();
     // Start listening to match only once
     controller.listenToMatch(widget.matchId);
+    _loadPlayerStats();
+  }
+  
+  /// Load player stats from Firebase
+  Future<void> _loadPlayerStats() async {
+    try {
+      final match = controller.currentMatch.value;
+      if (match == null) return;
+      
+      final databaseRef = FirebaseDatabase.instance.ref();
+      
+      // Load stats for all players
+      for (var player in match.players) {
+        try {
+          // Try to get from users node first
+          final userSnapshot = await databaseRef.child('users').child(player.userId).get();
+          if (userSnapshot.exists) {
+            final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+            _playerStats[player.userId] = {
+              'totalPoints': userData['totalPoints'] ?? 0,
+              'matchesWon': userData['matchesWon'] ?? 0,
+            };
+          } else {
+            // Fallback to leaderboard
+            final leaderboardSnapshot = await databaseRef.child('leaderboard').child('allTime').child(player.userId).get();
+            if (leaderboardSnapshot.exists) {
+              final leaderboardData = Map<String, dynamic>.from(leaderboardSnapshot.value as Map);
+              _playerStats[player.userId] = {
+                'totalPoints': leaderboardData['totalPoints'] ?? 0,
+                'matchesWon': leaderboardData['matchesWon'] ?? 0,
+              };
+            }
+          }
+        } catch (e) {
+          print('⚠️ Error loading stats for ${player.userId}: $e');
+        }
+      }
+      
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print('⚠️ Error loading player stats: $e');
+    }
   }
 
   @override
@@ -66,6 +112,13 @@ class _MatchLobbyScreenState extends State<MatchLobbyScreen> {
               color: AppColors.primaryTeal,
             ),
           );
+        }
+    
+        // Reload player stats when match players change
+        if (match.players.length != _playerStats.length) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _loadPlayerStats();
+          });
         }
     
         // Check if match started

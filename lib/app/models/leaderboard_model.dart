@@ -6,6 +6,7 @@ class LeaderboardModel {
   final String? userAvatar;
   final int totalPoints;
   final int testsCompleted;
+  final int matchesWon; // Number of matches won
   final DateTime lastUpdated;
   final bool isCurrentUser;
 
@@ -16,6 +17,7 @@ class LeaderboardModel {
     this.userAvatar,
     required this.totalPoints,
     required this.testsCompleted,
+    this.matchesWon = 0,
     required this.lastUpdated,
     this.isCurrentUser = false,
   });
@@ -28,6 +30,7 @@ class LeaderboardModel {
       userAvatar: json['userAvatar']?.toString(),
       totalPoints: (json['totalPoints'] ?? 0) as int,
       testsCompleted: (json['testsCompleted'] ?? 0) as int,
+      matchesWon: (json['matchesWon'] ?? 0) as int,
       lastUpdated: json['lastUpdated'] != null
           ? DateTime.fromMillisecondsSinceEpoch(json['lastUpdated'] as int)
           : DateTime.now(),
@@ -42,6 +45,7 @@ class LeaderboardModel {
       'userAvatar': userAvatar,
       'totalPoints': totalPoints,
       'testsCompleted': testsCompleted,
+      'matchesWon': matchesWon,
       'lastUpdated': lastUpdated.millisecondsSinceEpoch,
     };
   }
@@ -53,6 +57,7 @@ class LeaderboardModel {
     String? userAvatar,
     int? totalPoints,
     int? testsCompleted,
+    int? matchesWon,
     DateTime? lastUpdated,
     bool? isCurrentUser,
   }) {
@@ -63,6 +68,7 @@ class LeaderboardModel {
       userAvatar: userAvatar ?? this.userAvatar,
       totalPoints: totalPoints ?? this.totalPoints,
       testsCompleted: testsCompleted ?? this.testsCompleted,
+      matchesWon: matchesWon ?? this.matchesWon,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isCurrentUser: isCurrentUser ?? this.isCurrentUser,
     );

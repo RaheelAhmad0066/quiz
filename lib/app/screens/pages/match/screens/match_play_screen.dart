@@ -309,21 +309,23 @@ class _MatchPlayScreenState extends State<MatchPlayScreen> {
       _isMovingToNext = false;
       
       // End match and calculate scores before navigating
-      // Wait for scores to be calculated and saved
+      // endMatch already waits for scores to be saved, so navigate immediately
       await controller.endMatch(widget.matchId).then((_) {
         print('✅ Match ended, scores calculated. Navigating to results...');
-        // Wait longer to ensure Firebase has updated and match data is refreshed
-        Future.delayed(Duration(milliseconds: 1500), () {
-          if (mounted) {
-            // Ensure match data is refreshed before navigating
-            controller.listenToMatch(widget.matchId);
-            Get.off(() => MatchResultScreen(matchId: widget.matchId));
-          }
-        });
+        if (mounted) {
+          // Ensure match data is refreshed before navigating
+          controller.listenToMatch(widget.matchId);
+          // Small delay just for UI smoothness (scores are already saved)
+          Future.delayed(Duration(milliseconds: 300), () {
+            if (mounted) {
+              Get.off(() => MatchResultScreen(matchId: widget.matchId));
+            }
+          });
+        }
       }).catchError((e) {
         print('❌ Error ending match: $e');
-        // Navigate anyway after a delay
-        Future.delayed(Duration(milliseconds: 1500), () {
+        // Navigate anyway after a small delay
+        Future.delayed(Duration(milliseconds: 300), () {
           if (mounted) {
             controller.listenToMatch(widget.matchId);
             Get.off(() => MatchResultScreen(matchId: widget.matchId));

@@ -280,13 +280,26 @@ class LeaderboardScreen extends StatelessWidget {
               ),
             ),
           ),
-          Text(
-            '${player.totalPoints} pts',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: isUser ? Colors.white : Colors.black54,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${player.totalPoints} pts',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isUser ? Colors.white : Colors.black54,
+                ),
+              ),
+              if (player.matchesWon > 0)
+                Text(
+                  '${player.matchesWon} wins',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isUser ? Colors.white70 : Colors.black38,
+                  ),
+                ),
+            ],
           ),
         ],
       ),

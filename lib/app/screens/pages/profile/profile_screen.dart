@@ -6,6 +6,7 @@ import 'package:afn_test/app/routes/app_routes.dart';
 import 'package:afn_test/app/controllers/auth_controller.dart';
 import 'package:afn_test/app/controllers/leaderboard_controller.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -13,8 +14,47 @@ import 'package:get/get.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:share_plus/share_plus.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  final RxList<Map<String, dynamic>> matchHistory = <Map<String, dynamic>>[].obs;
+  final RxBool isLoadingHistory = false.obs;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadMatchHistory();
+    });
+  }
+
+  Future<void> _loadMatchHistory() async {
+    try {
+      isLoadingHistory.value = true;
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      final databaseRef = FirebaseDatabase.instance.ref();
+      final userSnapshot = await databaseRef.child('users').child(currentUserId).get();
+
+      if (userSnapshot.exists) {
+        final userData = Map<String, dynamic>.from(userSnapshot.value as Map);
+        final history = (userData['matchHistory'] as List<dynamic>?) ?? [];
+        matchHistory.value = history
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+    } catch (e) {
+      print('Error loading match history: $e');
+    } finally {
+      isLoadingHistory.value = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,9 +184,30 @@ class ProfileScreen extends StatelessWidget {
                           ),
                           Expanded(
                             child: _buildStatItem(
+                              icon: Iconsax.medal,
+                              label: 'Matches Won',
+                              value: '${userStats?.matchesWon ?? 0}',
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12.h),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildStatItem(
                               icon: Iconsax.book,
                               label: 'Tests Completed',
                               value: '${userStats?.testsCompleted ?? 0}',
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildStatItem(
+                              icon: Iconsax.ranking,
+                              label: 'Rank',
+                              value: userStats != null 
+                                  ? '#${leaderboardController.currentLeaderboard.indexWhere((e) => e.userId == userStats.userId) + 1}'
+                                  : '#-',
                             ),
                           ),
                         ],
@@ -155,6 +216,11 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 );
               }),
+
+              SizedBox(height: 12.h),
+
+              // Match History Section - Navigate to full screen
+              _buildMatchHistoryTile(),
 
               SizedBox(height: 12.h),
 
@@ -283,6 +349,21 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildMatchHistoryTile() {
+    return Obx(() {
+      final historyCount = matchHistory.length;
+      return _buildMenuTile(
+        icon: Iconsax.game,
+        title: 'Match History',
+        subtitle: historyCount > 0 ? '$historyCount matches' : 'No matches yet',
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Get.toNamed('/match-history');
+        },
+      );
+    });
+  }
+
   void _shareApp() {
     Share.share(
       'Check out Quizzax - An amazing quiz app to test your knowledge and compete with others!\n\nDownload now and start learning!',
@@ -321,6 +402,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _buildMenuTile({
     required IconData icon,
     required String title,
+    String? subtitle,
     required VoidCallback onTap,
   }) {
     return Container(
@@ -351,6 +433,14 @@ class ProfileScreen extends StatelessWidget {
             fontWeight: FontWeight.w500,
           ),
         ),
+        subtitle: subtitle != null
+            ? Text(
+                subtitle,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              )
+            : null,
         trailing: Icon(
           Icons.arrow_forward_ios,
           color: AppColors.textLight,

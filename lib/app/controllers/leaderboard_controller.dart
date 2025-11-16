@@ -166,6 +166,7 @@ class LeaderboardController extends GetxController {
     String? userAvatar,
     required int points,
     required bool testPassed,
+    bool isMatchWinner = false, // Track if user won the match
   }) async {
     if (!isFirebaseAvailable) {
       print('Firebase not available, cannot update score');
@@ -182,6 +183,7 @@ class LeaderboardController extends GetxController {
         userAvatar: userAvatar,
         points: points,
         testPassed: testPassed,
+        isMatchWinner: isMatchWinner,
       );
       
       // Note: loadLeaderboard() will be called once after all player updates
@@ -201,6 +203,7 @@ class LeaderboardController extends GetxController {
     String? userAvatar,
     required int points,
     required bool testPassed,
+    bool isMatchWinner = false, // Track if user won the match
   }) async {
     try {
       final dbRef = databaseRef;
@@ -217,17 +220,23 @@ class LeaderboardController extends GetxController {
         final data = Map<String, dynamic>.from(snapshot.value as Map);
         final currentPoints = (data['totalPoints'] ?? 0) as int;
         final testsCompleted = (data['testsCompleted'] ?? 0) as int;
+        final matchesWon = (data['matchesWon'] ?? 0) as int;
         final newPoints = testPassed ? currentPoints + points : currentPoints;
+        final newMatchesWon = isMatchWinner ? matchesWon + 1 : matchesWon;
         
         print('📊 Updating score for $userId:');
         print('   Current points: $currentPoints');
         print('   Points to add: $points');
         print('   New points: $newPoints');
+        print('   Current matches won: $matchesWon');
+        print('   Is winner: $isMatchWinner');
+        print('   New matches won: $newMatchesWon');
         print('   Test passed: $testPassed');
         
         await ref.update({
           'totalPoints': newPoints,
           'testsCompleted': testsCompleted + 1,
+          'matchesWon': newMatchesWon,
           'lastUpdated': DateTime.now().millisecondsSinceEpoch,
         });
         
@@ -235,8 +244,10 @@ class LeaderboardController extends GetxController {
       } else {
         // New user, create entry
         final initialPoints = testPassed ? points : 0;
+        final initialMatchesWon = isMatchWinner ? 1 : 0;
         print('📊 Creating new leaderboard entry for $userId:');
         print('   Initial points: $initialPoints');
+        print('   Initial matches won: $initialMatchesWon');
         print('   Test passed: $testPassed');
         
         await ref.set({
@@ -245,6 +256,7 @@ class LeaderboardController extends GetxController {
           'userAvatar': userAvatar,
           'totalPoints': initialPoints,
           'testsCompleted': 1,
+          'matchesWon': initialMatchesWon,
           'lastUpdated': DateTime.now().millisecondsSinceEpoch,
         });
         

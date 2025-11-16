@@ -18,4 +18,5 @@ class AppRoutes {
   static const String matchLobby = '/match-lobby';
   static const String matchPlay = '/match-play';
   static const String matchResult = '/match-result';
+  static const String matchHistory = '/match-history';
 }

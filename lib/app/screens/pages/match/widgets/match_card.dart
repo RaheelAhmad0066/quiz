@@ -10,6 +10,9 @@ class MatchCard extends StatelessWidget {
   final String creatorName;
   final String? creatorAvatar;
   final int creatorPoints;
+  final int? creatorWins; // Number of matches won
+  final int? creatorRank; // User's rank
+  final int? creatorTestsCompleted; // Number of tests completed
   final String status;
   final bool isLocked;
   final bool isClosed;
@@ -27,6 +30,9 @@ class MatchCard extends StatelessWidget {
     required this.creatorName,
     this.creatorAvatar,
     required this.creatorPoints,
+    this.creatorWins,
+    this.creatorRank,
+    this.creatorTestsCompleted,
     required this.status,
     required this.isLocked,
     required this.isClosed,
@@ -92,22 +98,50 @@ class MatchCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      SizedBox(height: 4.h),
-                      Row(
-                        children: [
-                          Icon(
-                            Iconsax.star,
-                            size: 14.sp,
-                            color: AppColors.accentYellowGreen,
-                          ),
-                          SizedBox(width: 4.w),
-                          Text(
-                            '$creatorPoints points',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
+                      SizedBox(height: 8.h),
+                      // Stats Row - Points, Wins, Rank, Tests Completed
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentYellowGreenLight.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(12.r),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            // Points
+                            _buildStatChip(
+                              icon: Iconsax.star,
+                              value: '$creatorPoints',
+                              label: 'Points',
+                              iconColor: AppColors.accentYellowGreen,
                             ),
-                          ),
-                        ],
+                            // Wins
+                            if (creatorWins != null)
+                              _buildStatChip(
+                                icon: Icons.emoji_events,
+                                value: '$creatorWins',
+                                label: 'Wins',
+                                iconColor: Colors.amber,
+                              ),
+                            // Rank
+                            if (creatorRank != null)
+                              _buildStatChip(
+                                icon: Iconsax.ranking,
+                                value: '#$creatorRank',
+                                label: 'Rank',
+                                iconColor: AppColors.primaryTeal,
+                              ),
+                            // Tests Completed
+                            if (creatorTestsCompleted != null)
+                              _buildStatChip(
+                                icon: Iconsax.book,
+                                value: '$creatorTestsCompleted',
+                                label: 'Tests',
+                                iconColor: Colors.blue,
+                              ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -136,36 +170,10 @@ class MatchCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Status Badge
+                // Player Count (Status removed)
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-                      decoration: BoxDecoration(
-                        color: _getStatusColor(status, isLocked, isClosed).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20.r),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _getStatusIcon(status, isLocked, isClosed),
-                            size: 14.sp,
-                            color: _getStatusColor(status, isLocked, isClosed),
-                          ),
-                          SizedBox(width: 6.w),
-                          Text(
-                            _getStatusText(status, isLocked, isClosed),
-                            style: AppTextStyles.label14.copyWith(
-                              color: _getStatusColor(status, isLocked, isClosed),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Spacer(),
-                    // Player Count
                     Row(
                       children: [
                         Icon(
@@ -175,7 +183,7 @@ class MatchCard extends StatelessWidget {
                         ),
                         SizedBox(width: 4.w),
                         Text(
-                          '$playerCount/$maxPlayers',
+                          '$playerCount/$maxPlayers Players',
                           style: AppTextStyles.bodyMedium.copyWith(
                             color: AppColors.textSecondary,
                             fontWeight: FontWeight.w600,
@@ -248,58 +256,39 @@ class MatchCard extends StatelessWidget {
     );
   }
 
-  Color _getStatusColor(String status, bool isLocked, bool isClosed) {
-    if (isClosed) return Colors.grey;
-    if (isLocked) return Colors.orange;
-    switch (status.toLowerCase()) {
-      case 'waiting':
-        return AppColors.primaryTeal;
-      case 'starting':
-        return Colors.blue;
-      case 'inprogress':
-      case 'in_progress':
-        return Colors.purple;
-      case 'completed':
-        return AppColors.accentYellowGreen;
-      default:
-        return Colors.grey;
-    }
+  Widget _buildStatChip({
+    required IconData icon,
+    required String value,
+    required String label,
+    required Color iconColor,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 18.sp,
+          color: iconColor,
+        ),
+        SizedBox(height: 4.h),
+        Text(
+          value,
+          style: AppTextStyles.label14.copyWith(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        SizedBox(height: 2.h),
+        Text(
+          label,
+          style: AppTextStyles.bodySmall.copyWith(
+            color: AppColors.textSecondary,
+            fontSize: 10.sp,
+          ),
+        ),
+      ],
+    );
   }
 
-  IconData _getStatusIcon(String status, bool isLocked, bool isClosed) {
-    if (isClosed) return Iconsax.close_circle;
-    if (isLocked) return Iconsax.lock;
-    switch (status.toLowerCase()) {
-      case 'waiting':
-        return Iconsax.clock;
-      case 'starting':
-        return Iconsax.play;
-      case 'inprogress':
-      case 'in_progress':
-        return Iconsax.play_circle;
-      case 'completed':
-        return Iconsax.tick_circle;
-      default:
-        return Iconsax.info_circle;
-    }
-  }
-
-  String _getStatusText(String status, bool isLocked, bool isClosed) {
-    if (isClosed) return 'Closed';
-    if (isLocked) return 'Locked';
-    switch (status.toLowerCase()) {
-      case 'waiting':
-        return 'Waiting';
-      case 'starting':
-        return 'Starting';
-      case 'inprogress':
-      case 'in_progress':
-        return 'In Progress';
-      case 'completed':
-        return 'Completed';
-      default:
-        return 'Unknown';
-    }
-  }
 }
 

@@ -5,10 +5,12 @@ import 'package:afn_test/app/models/match/match_model.dart';
 import 'package:afn_test/app/routes/app_routes.dart';
 import 'package:afn_test/app/screens/dashbord/dashboard_controller.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:confetti/confetti.dart';
 
 /// Match Result Screen - Shows results and updates leaderboard
 class MatchResultScreen extends StatefulWidget {
@@ -28,14 +30,22 @@ class _MatchResultScreenState extends State<MatchResultScreen>
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
+  late ConfettiController _confettiController;
+  final Rx<Map<String, int>?> matchScores = Rx<Map<String, int>?>(null);
+  final RxBool isLoadingScores = false.obs;
+  final RxList<MatchPlayer> matchPlayers = <MatchPlayer>[].obs;
+  final RxString matchCreatedBy = ''.obs;
 
   @override
   void initState() {
     super.initState();
     final controller = Get.find<MatchController>();
     
-    // Ensure match listener is active to get latest data with scores
+    // Ensure match listener is active to get latest data
     controller.listenToMatch(widget.matchId);
+    
+    // Load scores from separate collection
+    _loadMatchScores();
     
     _animationController = AnimationController(
       vsync: this,
@@ -56,6 +66,9 @@ class _MatchResultScreenState extends State<MatchResultScreen>
       ),
     );
 
+    // Initialize confetti controller
+    _confettiController = ConfettiController(duration: const Duration(seconds: 3));
+
     // Start animation
     _animationController.forward();
   }
@@ -63,13 +76,73 @@ class _MatchResultScreenState extends State<MatchResultScreen>
   @override
   void dispose() {
     _animationController.dispose();
+    _confettiController.dispose();
     super.dispose();
   }
 
+  Future<void> _loadMatchScores() async {
+    try {
+      isLoadingScores.value = true;
+      final databaseRef = FirebaseDatabase.instance.ref();
+      final scoresSnapshot = await databaseRef.child('matchScores').child(widget.matchId).get();
+      
+      if (scoresSnapshot.exists) {
+        final scoresData = Map<String, dynamic>.from(scoresSnapshot.value as Map);
+        
+        // Load scores
+        final scores = scoresData['scores'] as Map<dynamic, dynamic>?;
+        if (scores != null) {
+          matchScores.value = Map<String, int>.from(
+            scores.map((key, value) => MapEntry(key.toString(), value as int))
+          );
+          print('✅ Loaded scores from matchScores collection: ${matchScores.value}');
+        }
+        
+        // Load players from matchScores
+        final players = scoresData['players'] as List<dynamic>?;
+        if (players != null) {
+          matchPlayers.value = players
+              .map((p) => MatchPlayer.fromJson(Map<String, dynamic>.from(p as Map)))
+              .toList();
+          print('✅ Loaded ${matchPlayers.length} players from matchScores');
+        }
+        
+        // Load createdBy
+        if (scoresData['createdBy'] != null) {
+          matchCreatedBy.value = scoresData['createdBy']?.toString() ?? '';
+        }
+      } else {
+        print('⚠️ Scores not found in matchScores collection, trying match...');
+        // Fallback: try to get from match (for backward compatibility)
+        final matchSnapshot = await databaseRef.child('matches').child(widget.matchId).get();
+        if (matchSnapshot.exists) {
+          final matchData = Map<String, dynamic>.from(matchSnapshot.value as Map);
+          final scores = matchData['scores'] as Map<dynamic, dynamic>?;
+          if (scores != null) {
+            matchScores.value = Map<String, int>.from(
+              scores.map((key, value) => MapEntry(key.toString(), value as int))
+            );
+            print('✅ Loaded scores from match (fallback): ${matchScores.value}');
+          }
+          
+          // Load players from match
+          final players = matchData['players'] as List<dynamic>?;
+          if (players != null) {
+            matchPlayers.value = players
+                .map((p) => MatchPlayer.fromJson(Map<String, dynamic>.from(p as Map)))
+                .toList();
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ Error loading match scores: $e');
+    } finally {
+      isLoadingScores.value = false;
+    }
+  }
+
   void _navigateToLeaderboard() async {
-    final controller = Get.find<MatchController>();
-    // Delete match from database
-    await controller.deleteMatch(widget.matchId);
+    // Match already deleted in endMatch, just navigate
     // Navigate to dashboard (leaderboard tab)
     Get.offAllNamed(AppRoutes.dashboard);
     // Switch to leaderboard tab (index 2)
@@ -87,9 +160,11 @@ class _MatchResultScreenState extends State<MatchResultScreen>
       body: SafeArea(
         child: Obx(() {
           final match = controller.currentMatch.value;
+          final scores = matchScores.value;
+          final players = matchPlayers;
           
-          // Wait for match data to load
-          if (match == null) {
+          // Wait for data to load
+          if (isLoadingScores.value) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -109,40 +184,19 @@ class _MatchResultScreenState extends State<MatchResultScreen>
             );
           }
 
-          // Get all players with scores
+          // Get players from matchScores (since match is deleted) or from current match
           final allPlayersWithScores = <MatchPlayer>[];
           
-          // First, add all players from match.players
-          if (match.players.isNotEmpty) {
-            for (var player in match.players) {
-              allPlayersWithScores.add(player);
-            }
+          if (players.isNotEmpty) {
+            // Use players from matchScores (match already deleted)
+            allPlayersWithScores.addAll(players);
+          } else if (match != null && match.players.isNotEmpty) {
+            // Fallback: use players from current match if available
+            allPlayersWithScores.addAll(match.players);
           }
           
-          // Also check scores map for any players not in match.players (fallback)
-          // This ensures we show players even if match.players is empty
-          if (match.scores.isNotEmpty) {
-            for (var scoreEntry in match.scores.entries) {
-              final playerId = scoreEntry.key;
-              // Only add if not already in list
-              if (!allPlayersWithScores.any((p) => p.userId == playerId)) {
-                // Try to get player name from Firebase or use fallback
-                String playerName = 'Player ${playerId.substring(0, playerId.length > 8 ? 8 : playerId.length)}';
-                
-                // Create a temporary player entry for display
-                allPlayersWithScores.add(MatchPlayer(
-                  userId: playerId,
-                  userName: playerName,
-                  userEmail: '$playerId@temp.com',
-                  userAvatar: null,
-                  joinedAt: DateTime.now(),
-                ));
-              }
-            }
-          }
-          
-          // If still no players, show loading (match data might still be updating)
-          if (allPlayersWithScores.isEmpty && match.scores.isEmpty) {
+          // If no players, show loading
+          if (allPlayersWithScores.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -162,11 +216,35 @@ class _MatchResultScreenState extends State<MatchResultScreen>
             );
           }
           
-          // Sort players by score
+          // If scores not loaded yet, try loading again
+          if (scores == null || scores.isEmpty) {
+            if (!isLoadingScores.value) {
+              _loadMatchScores();
+            }
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    color: AppColors.primaryTeal,
+                  ),
+                  SizedBox(height: 16.h),
+                  Text(
+                    'Loading scores...',
+                    style: AppTextStyles.titleMedium.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          // Sort players by score (from matchScores collection)
           final sortedPlayers = allPlayersWithScores.toList()
             ..sort((a, b) {
-              final scoreA = match.scores[a.userId] ?? 0;
-              final scoreB = match.scores[b.userId] ?? 0;
+              final scoreA = scores[a.userId] ?? 0;
+              final scoreB = scores[b.userId] ?? 0;
               return scoreB.compareTo(scoreA);
             });
 
@@ -198,15 +276,25 @@ class _MatchResultScreenState extends State<MatchResultScreen>
 
           final winner = sortedPlayers.first;
           final isWinner = winner.userId == currentUserId;
-          final winnerScore = match.scores[winner.userId] ?? 0;
+          final winnerScore = scores[winner.userId] ?? 0;
+          final currentUserScore = scores[currentUserId ?? ''] ?? 0;
 
-          return SingleChildScrollView(
+          // Trigger confetti if winner
+          if (isWinner) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _confettiController.play();
+            });
+          }
+
+          return Stack(
+            children: [
+              SingleChildScrollView(
             padding: EdgeInsets.all(16.w),
             child: Column(
               children: [
                 SizedBox(height: 20.h),
 
-                // Winner Card with Animation
+                // Winner/Loser Card with Animation
                 ScaleTransition(
                   scale: _scaleAnimation,
                   child: FadeTransition(
@@ -218,14 +306,14 @@ class _MatchResultScreenState extends State<MatchResultScreen>
                         gradient: LinearGradient(
                           colors: isWinner
                               ? [AppColors.primaryTeal, AppColors.primaryTealLight]
-                              : [Colors.grey.shade300, Colors.grey.shade400],
+                              : [Colors.red.shade400, Colors.red.shade600],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(20.r),
                         boxShadow: [
                           BoxShadow(
-                            color: (isWinner ? AppColors.primaryTeal : Colors.grey)
+                            color: (isWinner ? AppColors.primaryTeal : Colors.red)
                                 .withOpacity(0.3),
                             blurRadius: 30,
                             offset: Offset(0, 15),
@@ -256,7 +344,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
                           ),
                           SizedBox(height: 16.h),
                           Text(
-                            isWinner ? '🎉 You Won! 🎉' : '${winner.userName} Won!',
+                            isWinner ? '🎉 You Won! 🎉' : '😔 You Lost',
                             style: AppTextStyles.headlineLarge.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
@@ -265,13 +353,25 @@ class _MatchResultScreenState extends State<MatchResultScreen>
                           ),
                           SizedBox(height: 8.h),
                           Text(
-                            'Score: $winnerScore/10',
+                            isWinner 
+                                ? 'Score: $winnerScore/10' 
+                                : 'Your Score: $currentUserScore/10',
                             style: AppTextStyles.titleMedium.copyWith(
                               color: Colors.white.withOpacity(0.9),
                               fontSize: 24.sp,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                          if (!isWinner) ...[
+                            SizedBox(height: 8.h),
+                            Text(
+                              'Winner: ${winner.userName}',
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 16.sp,
+                              ),
+                            ),
+                          ],
                           if (isWinner) ...[
                             SizedBox(height: 12.h),
                             Container(
@@ -315,7 +415,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
                 ...sortedPlayers.asMap().entries.map((entry) {
                   final index = entry.key;
                   final player = entry.value;
-                  final score = match.scores[player.userId] ?? 0;
+                  final score = scores[player.userId] ?? 0;
                   final isCurrentUser = player.userId == currentUserId;
                   final isTopThree = index < 3;
 
@@ -477,6 +577,31 @@ class _MatchResultScreenState extends State<MatchResultScreen>
                 SizedBox(height: 20.h),
               ],
             ),
+          ),
+              // Confetti overlay for winner
+              if (isWinner)
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: ConfettiWidget(
+                    confettiController: _confettiController,
+                    blastDirection: 3.14 / 2, // Top to bottom
+                    maxBlastForce: 5,
+                    minBlastForce: 2,
+                    emissionFrequency: 0.05,
+                    numberOfParticles: 50,
+                    gravity: 0.1,
+                    shouldLoop: false,
+                    colors: const [
+                      Colors.green,
+                      Colors.blue,
+                      Colors.pink,
+                      Colors.orange,
+                      Colors.purple,
+                      Colors.yellow,
+                    ],
+                  ),
+                ),
+            ],
           );
         }),
       ),
